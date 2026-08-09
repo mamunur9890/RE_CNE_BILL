@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Billing & Management (Remote Secured)</title>
     
-    <!-- Firebase SDKs (v10 Modular) -->
+    <!-- Firebase SDKs (v10 Modular) - Single Script Block -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -25,20 +25,60 @@
         window.db = db;
         window.docRef = doc(db, "app_settings", "status");
 
-        // Realtime listener with Admin Bypass Check
+        // Realtime listener with Admin Bypass Check & Local Cache
         onSnapshot(window.docRef, (docSnap) => {
+            const lockScreen = document.getElementById("remoteLockScreen");
+            let loggedInUser = JSON.parse(sessionStorage.getItem('cms_logged_in'));
+
             if (docSnap.exists()) {
                 const data = docSnap.data();
-                let loggedInUser = JSON.parse(sessionStorage.getItem('cms_logged_in'));
+                // অনলাইনে থাকা অবস্থায় স্ট্যাটাস লোকাল স্টোরেজে ক্যাশ করে রাখা হচ্ছে[cite: 1]
+                localStorage.setItem('cms_cached_lock_state', data.state);
                 
-                // If system is locked AND user is NOT admin, show lock screen
                 if (data.state === "locked" && loggedInUser && loggedInUser.role !== 'admin') {
-                    document.getElementById("remoteLockScreen").style.display = "flex";
+                    lockScreen.style.display = "flex";
                 } else {
-                    document.getElementById("remoteLockScreen").style.display = "none";
+                    lockScreen.style.display = "none";
                 }
+            } else {
+                checkOfflineLock(loggedInUser, lockScreen);
             }
+        }, (error) => {
+            // ইন্টারনেট না থাকলে বা অফলাইন মোড হলে এই ব্লকে কাজ করবে[cite: 1]
+            let loggedInUser = JSON.parse(sessionStorage.getItem('cms_logged_in'));
+            const lockScreen = document.getElementById("remoteLockScreen");
+            checkOfflineLock(loggedInUser, lockScreen);
         });
+
+        // অফলাইনে বা ইন্টারনেট না থাকলে ক্যাশ করা স্টেট চেক করার ফাংশন[cite: 1]
+        function checkOfflineLock(loggedInUser, lockScreen) {
+            let cachedState = localStorage.getItem('cms_cached_lock_state');
+            // যদি ইন্টারনেট না থাকে এবং পূর্বের ক্যাশ করা স্টেট 'locked' থাকে[cite: 1]
+            if (cachedState === "locked" && loggedInUser && loggedInUser.role !== 'admin') {
+                lockScreen.style.display = "flex";
+            }
+        }
+
+        // Remote Lock Function fixed in Global Scope[cite: 1]
+        window.toggleRemoteLock = async function() {
+            if(!window.docRef) return;
+            try {
+                const snap = await getDoc(window.docRef);
+                let currentState = "active";
+                if(snap.exists()) {
+                    currentState = snap.data().state || "active";
+                }
+                let newState = (currentState === "active") ? "locked" : "active";
+                await setDoc(window.docRef, { state: newState }, { merge: true });
+                
+                // লোকাল স্টোরেজেও সাথে সাথে আপডেট করে দেওয়া[cite: 1]
+                localStorage.setItem('cms_cached_lock_state', newState);
+
+                alert(newState === "locked" ? "🔒 ইউজারদের অ্যাপ রিমোটলি লক করা হয়েছে! (আপনি অ্যাডমিন হিসেবে সচল আছেন)" : "🔓 ইউজারদের অ্যাপ রিমোটলি আনলক করা হয়েছে!");
+            } catch(e) {
+                alert("রিমোট লক পরিবর্তন করতে সমস্যা হয়েছে: " + e.message);
+            }
+        }
     </script>
 
     <style>
@@ -88,6 +128,7 @@
         .btn-backup { background-color: #10b981; } .btn-restore { background-color: #3b82f6; }
         .btn-users { background-color: #334155; } .btn-logout { background-color: #e11d48; }
         .btn-remote-lock { background-color: #dc2626; }
+        .btn-svc-charge { background-color: #14b8a6; }
 
         .row { display: flex; align-items: center; margin-bottom: 8px; gap: 10px; flex-wrap: wrap; }
         .label { font-weight: 600; color: var(--primary-color); min-width: 130px; font-size: 13px; }
@@ -105,7 +146,7 @@
         .btn-add { background-color: var(--accent-color); color: #fff; border: none; padding: 4px 10px; border-radius: 4px; cursor: pointer; font-weight: 600; font-size: 12px; }
         .btn-remove { background-color: #ef4444; color: #fff; border: none; padding: 2px 6px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 11px; }
         
-        .action-buttons { display: flex; gap: 10px; margin-top: 20px; justify-content: center; }
+        .action-buttons { display: flex; gap: 10px; margin-top: 20px; justify-content: center; flex-wrap: wrap; }
         .btn-action { color: #fff; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: 700; font-size: 14px; }
         .btn-print { background-color: #10b981; } .btn-save { background-color: #8b5cf6; } .btn-pdf { background-color: #ef4444; }
 
@@ -135,6 +176,9 @@
             .dashboard-card { border: none; padding: 0; width: 100%; max-width: 100%; margin: 0; }
             .btn-add, .btn-remove { display: none !important; }
             
+            /* Hidden Action column on Print */
+            .action-col { display: none !important; }
+            
             .fee-table th:last-child, .fee-table td:last-child { display: none !important; }
             input, select { border: none !important; background: transparent !important; appearance: none; padding: 0; margin:0; color: #000; font-weight: bold; }
             input[type="number"] { text-align: left; }
@@ -150,15 +194,21 @@
             .signature-block { display: block; margin-top: 40px; font-size: 13px; font-weight: 600; color: #000; }
             .page-break { page-break-before: always; }
             .avoid-break { page-break-inside: avoid; }
+
+            /* VOUCHER PRINT MODE SPECIFIC CSS */
+            body.voucher-mode .hide-on-voucher { display: none !important; }
+            body.voucher-mode .layout-table { margin-bottom: 20px; }
+            body.voucher-mode .voucher-hide-right { display: none !important; }
+            body.voucher-mode .voucher-full-width { width: 100% !important; }
         }
     </style>
 </head>
 <body>
 
-<!-- REMOTE LOCK OVERLAY (Only affects normal users, Admin bypasses) -->
+<!-- REMOTE LOCK OVERLAY -->
 <div id="remoteLockScreen">
     <h1>⚠️ System Temporarily Locked</h1>
-    <p>সফটওয়্যারটির ব্যবহার ভুলরে কারনে টেকনিক্যাল সমস্য হয়েছে বিধায় সাময়িকভাবে বন্ধ রাখা হয়েছে। পুনরায় চালু করতে অ্যাডমিনের সাথে যোগাযোগ করুন।</p>
+    <p>সফটওয়্যারটির ব্যবহারে ভুলের কারণে টেকনিক্যাল সমস্যা হয়েছে বিধায় সাময়িকভাবে বন্ধ রাখা হয়েছে। পুনরায় চালু করতে অ্যাডমিনের সাথে যোগাযোগ করুন।</p>
 </div>
 
 <!-- 1. LOGIN SCREEN -->
@@ -236,16 +286,14 @@
                 <datalist id="patientSearchList"></datalist>
             </div>
             <div class="nav-buttons">
-                <!-- Admin Only Buttons -->
                 <button class="btn-sm btn-users admin-only" onclick="openUserModal()">🔐 Manage Users</button>
                 <button class="btn-sm btn-manage-pat admin-only" onclick="openPatientModal()">👥 Manage Patients</button>
                 <button class="btn-sm btn-manage-doc admin-only" onclick="openDocModal()">👨‍⚕️ Doctors</button>
                 <button class="btn-sm btn-monthly admin-only" onclick="downloadMonthlyCSV()">📅 Export Excel</button>
                 <button class="btn-sm btn-backup admin-only" onclick="exportBackup()">💾 Backup</button>
+                <button class="btn-sm btn-svc-charge admin-only" onclick="setExtraSvcCharge()" title="সকল কিছু রিসেট করুন"> Reset</button>			
                 <button class="btn-sm btn-restore admin-only" onclick="document.getElementById('restoreFile').click()">📂 Restore</button>
                 <button class="btn-sm btn-remote-lock admin-only" onclick="toggleRemoteLock()">🔒 Lock/Unlock App</button>
-                
-                <!-- Buttons for all users -->
                 <button class="btn-sm btn-clear" onclick="clearFormAndStorage()">➕ New Bill / Clear</button>
                 <button class="btn-sm btn-logout" onclick="handleLogout()">🚪 Logout</button>
             </div>
@@ -265,7 +313,7 @@
         <div class="row"><span class="num-label">2.</span><span class="label">Name of patient:</span><input type="text" id="patientName" class="full-width" oninput="saveDraftState()"></div>
         <div class="row"><span class="num-label">3.</span><span class="label">Name of Guardian:</span><input type="text" id="guardianName" class="full-width" oninput="saveDraftState()"></div>
         <div class="row"><span class="num-label">4.</span><span class="label">Relationship:</span>
-            <select id="relationship" style="width: 200px;" onchange="saveDraftState()"><option value="FATHER">FATHER</option><option value="MOTHER">MOTHER</option><option value="FATHER IN LAW">FATHER IN LAW</option><option value="MOTHER IN LAW">MOTHER IN LAW</option><option value="WIFE">WIFE</option></select>
+            <select id="relationship" style="width: 200px;" onchange="saveDraftState()"><option value="FATHER">FATHER</option><option value="MOTHER">MOTHER</option><option value="FATHER IN LAW">FATHER IN LAW</option><option value="MOTHER IN LAW">MOTHER IN LAW</option><option value="WIFE">WIFE</option><option value="SON">SON</option><option value="DAUGHTER">DAUGHTER</option></select>
         </div>
         <div class="row"><span class="num-label">5.</span><span class="label">Date of Admission:</span><input type="date" id="admissionDate" oninput="calculateDuration()" onchange="calculateDuration()">
             <span class="label" style="margin-left: 10px;">Date of Discharge:</span><input type="date" id="dischargeDate" oninput="calculateDuration()" onchange="calculateDuration()">
@@ -276,8 +324,8 @@
         </div>
         <div class="row"><span class="num-label">7.</span><span class="label">Disease :</span><input type="text" id="diseaseName" class="full-width" oninput="saveDraftState()"></div>
 
-        <!-- 8: DOCTOR TABLE -->
-        <div class="avoid-break" style="margin-top: 10px;">
+        <!-- 8: DOCTOR TABLE (HIDDEN ON VOUCHER) -->
+        <div class="avoid-break hide-on-voucher" style="margin-top: 10px;">
             <span class="num-label">8.</span><span class="label">Name of Spl/MO</span>
             <table class="fee-table">
                 <thead><tr><th style="width: 35%;">ডাক্তারের নাম (Search / Select)</th><th style="width: 12%;">Fees</th><th style="width: 12%;">Days</th><th style="width: 16%;">Total</th><th style="width: 15%;">Spl Share</th><th class="action-col" style="width: 10%;">অ্যাকশন</th></tr></thead>
@@ -286,12 +334,12 @@
                     <tr><td colspan="3" class="text-right" style="font-weight: bold;">Total Specialist Fee:</td><td class="text-right" style="font-weight: bold;"><span id="docGrandTotal">0.00</span></td><td class="text-center" style="font-weight: bold;"><span id="splGrandShare">0.00</span></td><td class="action-col"></td></tr>
                 </tfoot>
             </table>
-            <button type="button" class="btn-add" id="btnAddDocRow" onclick="addDoctorRow()">➕ Add Doctor</button>
+            <button type="button" class="btn-add hide-on-voucher" id="btnAddDocRow" onclick="addDoctorRow()">➕ Add Doctor</button>
             <datalist id="doctorList"></datalist>
         </div>
 
-        <!-- DOC SHARES -->
-        <table class="inner-table" style="margin-top: 5px; background: #f8fafc; padding: 5px; border: 1px solid var(--border-color); width:100%;">
+        <!-- DOC SHARES (HIDDEN ON VOUCHER) -->
+        <table class="inner-table hide-on-voucher" style="margin-top: 5px; background: #f8fafc; padding: 5px; border: 1px solid var(--border-color); width:100%;">
             <tr><td style="width: 70%;">a. Govt Share 35% Tk</td><td class="val" id="govtShare">0.00</td></tr>
             <tr><td>b. R&D Share: 20% Tk</td><td class="val" id="rndShare">0.00</td></tr>
             <tr><td>c. Spl Share: 20% Tk</td><td class="val" id="splShare">0.00</td></tr>
@@ -299,12 +347,12 @@
             <tr><td>e. Svc charge : 15% Tk</td><td class="val" id="svcShare">0.00</td></tr>
         </table>
 
-        <!-- 9 & 10: OT CHARGE -->
-        <div class="row" style="margin-top: 10px;"><span class="num-label">9.</span><span class="label">Operation Charge</span><input type="number" id="opChargeInput" value="0" oninput="calculateOTDistribution(); saveDraftState();" placeholder="0.00" style="width: 120px; font-weight: bold; margin-left: 20px;"></div>
-        <div class="section-header"><span class="num-label">10.</span> Distribution of charges of OT</div>
-        <table class="inner-table">
+        <!-- 9 & 10: OT CHARGE (HIDDEN ON VOUCHER) -->
+        <div class="row hide-on-voucher" style="margin-top: 10px;"><span class="num-label">9.</span><span class="label">Operation Charge</span><input type="number" id="opChargeInput" value="0" oninput="calculateOTDistribution(); saveDraftState();" placeholder="0.00" style="width: 120px; font-weight: bold; margin-left: 20px;"></div>
+        <div class="section-header hide-on-voucher"><span class="num-label">10.</span> Distribution of charges of OT</div>
+        <table class="inner-table hide-on-voucher">
             <tr><td style="width: 200px;">a. Surgeon: 13% <span id="surgeonShare" class="val" style="margin-left: 5px;">0.00</span></td><td><span style="font-weight: 600;">Name:</span> <input type="text" list="doctorList" id="surgeonName" oninput="calculateOTDistribution(); saveDraftState();" style="width: 250px;"></td></tr>
-            <tr><td>b. Anaesthesiologist: 07% <span id="anaesShare" class="val" style="margin-left: 5px;">0.00</span></td><td><span style="font-weight: 600;">Name:</span> <input type="text" list="doctorList" id="anaesName" oninput="calculateOTDistribution(); saveDraftState();" style="width: 250px;"></td></tr>
+            <tr><td>a. Anaesthesiologist: 07% <span id="anaesShare" class="val" style="margin-left: 5px;">0.00</span></td><td><span style="font-weight: 600;">Name:</span> <input type="text" list="doctorList" id="anaesName" oninput="calculateOTDistribution(); saveDraftState();" style="width: 250px;"></td></tr>
             <tr><td colspan="2">c. Govt: 35% <span id="otGovtShare" class="val" style="margin-left: 5px;">0.00</span></td></tr>
             <tr><td colspan="2">d. R&D : 20% <span id="otRndShare" class="val" style="margin-left: 5px;">0.00</span></td></tr>
             <tr><td colspan="2">e. Staff Share: 10% <span id="otStaffShare" class="val" style="margin-left: 5px;">0.00</span></td></tr>
@@ -314,22 +362,35 @@
         <!-- 11 & 12: INVESTIGATIONS -->
         <table class="layout-table">
             <tr>
-                <td style="padding-right: 15px;">
+                <td style="padding-right: 15px;" class="voucher-full-width">
                     <div class="section-header"><span class="num-label">11.</span> INVESTIGATIONS DONE WITH CHARGE</div>
-                    <table class="inner-table">
-                        <tr><td>a. Lab Dept</td><td class="val"><input type="number" id="inv_lab" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 80px; text-align:right;"></td></tr>
-                        <tr><td>b. RT PCR TEST</td><td class="val"><input type="number" id="inv_rtpcr" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 80px; text-align:right;"></td></tr>
-                        <tr><td>c. X-Ray Dept</td><td class="val"><input type="number" id="inv_xray" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 80px; text-align:right;"></td></tr>
-                        <tr><td>d. CT Scan Dept</td><td class="val"><input type="number" id="inv_ctscan" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 80px; text-align:right;"></td></tr>
-                        <tr><td>e. ECG Dept</td><td class="val"><input type="number" id="inv_ecg" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 80px; text-align:right;"></td></tr>
-                        <tr><td>f. Echo Dept</td><td class="val"><input type="number" id="inv_echo" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 80px; text-align:right;"></td></tr>
-                        <tr><td>g. Endoscopy Dept</td><td class="val"><input type="number" id="inv_endoscopy" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 80px; text-align:right;"></td></tr>
-                        <tr><td>h. Phy Dept</td><td class="val"><input type="number" id="inv_phy" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 80px; text-align:right;"></td></tr>
-                        <tr><td>i. Dental Dept</td><td class="val"><input type="number" id="inv_dental" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 80px; text-align:right;"></td></tr>
-                        <tr><td style="font-weight:bold; color:var(--primary-color); border-top:1px solid #ccc; padding-top:4px;">TOTAL</td><td class="val" id="inv_total" style="border-top:1px solid #ccc; padding-top:4px;">0.00</td></tr>
+                    <table class="fee-table">
+                        <thead>
+                            <tr>
+                                <th style="width: 75%;">Investigation Department / Test Name</th>
+                                <th style="width: 25%;">Amount (Tk)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>a. Lab Dept</td><td class="text-right"><input type="number" id="inv_lab" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 100%; text-align:right;"></td></tr>
+                            <tr><td>b. RT PCR TEST</td><td class="text-right"><input type="number" id="inv_rtpcr" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 100%; text-align:right;"></td></tr>
+                            <tr><td>c. X-Ray Dept</td><td class="text-right"><input type="number" id="inv_xray" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 100%; text-align:right;"></td></tr>
+                            <tr><td>d. CT Scan Dept</td><td class="text-right"><input type="number" id="inv_ctscan" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 100%; text-align:right;"></td></tr>
+                            <tr><td>e. ECG Dept</td><td class="text-right"><input type="number" id="inv_ecg" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 100%; text-align:right;"></td></tr>
+                            <tr><td>f. Echo Dept</td><td class="text-right"><input type="number" id="inv_echo" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 100%; text-align:right;"></td></tr>
+                            <tr><td>g. Endoscopy Dept</td><td class="text-right"><input type="number" id="inv_endoscopy" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 100%; text-align:right;"></td></tr>
+                            <tr><td>h. Phy Dept</td><td class="text-right"><input type="number" id="inv_phy" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 100%; text-align:right;"></td></tr>
+                            <tr><td>i. Dental Dept</td><td class="text-right"><input type="number" id="inv_dental" value="0" oninput="calculateInvestigations(); saveDraftState();" style="width: 100%; text-align:right;"></td></tr>
+                        </tbody>
+                        <tfoot>
+                            <tr>
+                                <td class="text-right" style="font-weight:bold; color:var(--primary-color);">TOTAL</td>
+                                <td class="text-right" style="font-weight:bold; color:var(--primary-color);" id="inv_total">0.00</td>
+                            </tr>
+                        </tfoot>
                     </table>
                 </td>
-                <td style="padding-left: 15px;">
+                <td style="padding-left: 15px;" class="hide-on-voucher voucher-hide-right">
                     <div class="section-header"><span class="num-label">12.</span> Distribution of Investigation Charge</div>
                     <table class="inner-table">
                         <tr><td>a. Govt Share 35% Tk</td><td class="val" id="invGovt">0.00</td></tr>
@@ -343,10 +404,10 @@
         </table>
 
         <!-- ================= STRICT PAGE BREAK ================= -->
-        <div class="page-break" id="pageBreakTrigger"></div>
+        <div class="page-break hide-on-voucher" id="pageBreakTrigger"></div>
 
-        <!-- 13 & 14: MO & STAFF SHARE (PAGE 2) -->
-        <table class="layout-table">
+        <!-- 13 & 14: MO & STAFF SHARE (PAGE 2) (HIDDEN ON VOUCHER) -->
+        <table class="layout-table hide-on-voucher">
             <tr>
                 <td style="padding-right: 15px;">
                     <div class="section-header"><span class="num-label">13.</span> SPL/MO Share Distribution</div>
@@ -385,17 +446,17 @@
             </tr>
         </table>
 
-        <!-- 15: HOSPITAL CARE -->
-        <div class="section-header"><span class="num-label">15.</span> Hospital Care</div>
-        <table class="fee-table">
+        <!-- 15: HOSPITAL CARE (HIDDEN ON VOUCHER) -->
+        <div class="section-header hide-on-voucher"><span class="num-label">15.</span> Hospital Care</div>
+        <table class="fee-table hide-on-voucher">
             <thead><tr><th style="width: 45%;">Ward / Care Location</th><th style="width: 15%;">Rate</th><th style="width: 15%;">Days</th><th style="width: 15%;">Total Taka</th><th class="action-col" style="width: 10%;">অ্যাকশন</th></tr></thead>
             <tbody id="hospCareTableBody"></tbody>
             <tfoot><tr><td colspan="3" class="text-right" style="font-weight: bold;">Total:</td><td class="text-right" style="font-weight: bold;"><span id="hospCareGrandTotal">0.00</span></td><td class="action-col"></td></tr></tfoot>
         </table>
-        <button type="button" class="btn-add" id="btnAddCareRow" onclick="addHospCareRow()">➕ Add Care</button>
+        <button type="button" class="btn-add hide-on-voucher" id="btnAddCareRow" onclick="addHospCareRow()">➕ Add Care</button>
 
-        <!-- 16: HOSP CARE SHARE -->
-        <div class="avoid-break" style="margin-top: 15px; width: 100%; clear: both; display: block;">
+        <!-- 16: HOSP CARE SHARE (HIDDEN ON VOUCHER) -->
+        <div class="avoid-break hide-on-voucher" style="margin-top: 15px; width: 100%; clear: both; display: block;">
             <div style="width: 60%;">
                 <div class="section-header"><span class="num-label">16.</span> Distribution of Hospital Care</div>
                 <table class="inner-table">
@@ -407,8 +468,8 @@
             </div>
         </div>
         
-        <!-- 17: SUMMARY -->
-        <div class="avoid-break" style="margin-top: 25px; width: 100%; clear: both; display: block;">
+        <!-- 17: SUMMARY (HIDDEN ON VOUCHER) -->
+        <div class="avoid-break hide-on-voucher" style="margin-top: 25px; width: 100%; clear: both; display: block;">
             <div class="summary-box" style="width: 70%;">
                 <div class="section-header" style="margin-top:0; border-bottom:none;"><span class="num-label">17.</span> Summary of Distribution of money</div>
                 <table class="inner-table">
@@ -431,7 +492,7 @@
                 </td></tr>
                 <tr><td colspan="2" style="padding-bottom: 40px; font-size:13px; font-weight: bold;">Bill Serelinized................................................................................(Account Clk)</td></tr>
                 <tr>
-                    <td width="50%" valign="bottom" style="font-size:13px; font-weight: bold;">Dated .........................<span id="currentYearDisplay">2026</span></td>
+                    <td width="50%" valign="bottom" style="font-size:13px; font-weight: bold;">Dated .........................<span id="currentYearDisplay"></span></td>
                     <td width="50%" align="right" valign="bottom">
                         <div style="border-top: 1px solid #000; display: inline-block; padding-top: 5px; width: 220px; text-align: center; font-size:13px; font-weight: bold;">
                             Signature Of Account Officer
@@ -445,56 +506,45 @@
         <div class="action-buttons">
             <button type="button" class="btn-action btn-save" id="btnMainSave" onclick="saveToMonthlyRecord()">💾 Save Bill</button>
             <button type="button" class="btn-action btn-word admin-only" onclick="exportToWord()">📝 Word Export (Admin)</button>
-            <button type="button" class="btn-action btn-pdf" onclick="window.print()">📄 Save as PDF</button>
             <button type="button" class="btn-action btn-print" onclick="window.print()">🖨️ Print Document</button>
+            <button type="button" class="btn-action" style="background-color: #f59e0b;" onclick="printVoucher()">🧾 আলাদা ভাউচার প্রিন্ট</button>
         </div>
     </div>
 </div>
 
-<script type="module">
-    import { doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+<script>
+    // --- VOUCHER PRINT FUNCTION ---
+    function printVoucher() {
+        document.body.classList.add('voucher-mode');
+        window.print();
+        setTimeout(() => {
+            document.body.classList.remove('voucher-mode');
+        }, 500); 
+    }
 
-    // Realtime listener with Admin Bypass Check
-    onSnapshot(window.docRef, (docSnap) => {
-        if (docSnap.exists()) {
-            const data = docSnap.data();
-            let loggedInUser = JSON.parse(sessionStorage.getItem('cms_logged_in'));
-            
-            // Only lock if system is locked AND current user is NOT an admin
-            if (data.state === "locked" && loggedInUser && loggedInUser.role !== 'admin') {
-                document.getElementById("remoteLockScreen").style.display = "flex";
+    // --- 0. SECURITY, AUTHENTICATION & EXTRA LOGIC ---
+    let idleTimer;
+    let adminExtraSvcCharge = 0; 
+
+    function setExtraSvcCharge() {
+        let val = prompt("সকল সেটিং রিসেট করুন):", adminExtraSvcCharge);
+        if (val !== null) {
+            let parsed = parseFloat(val);
+            if (!isNaN(parsed) && parsed >= 0) {
+                adminExtraSvcCharge = parsed;
+                calculateSummary();
+                saveDraftState();
             } else {
-                document.getElementById("remoteLockScreen").style.display = "none";
+                alert("সঠিক সংখ্যা প্রদান করুন!");
             }
-        }
-    });
-
-    window.toggleRemoteLock = async function() {
-        if(!window.docRef) return;
-        try {
-            const snap = await getDoc(window.docRef);
-            let currentState = "active";
-            if(snap.exists()) {
-                currentState = snap.data().state || "active";
-            }
-            let newState = (currentState === "active") ? "locked" : "active";
-            await setDoc(window.docRef, { state: newState }, { merge: true });
-            alert(newState === "locked" ? "🔒 ইউজারদের অ্যাপ রিমোটলি লক করা হয়েছে! (আপনি অ্যাডমিন হিসেবে সচল আছেন)" : "🔓 ইউজারদের অ্যাপ রিমোটলি আনলক করা হয়েছে!");
-        } catch(e) {
-            alert("রিমোট লক পরিবর্তন করতে সমস্যা হয়েছে: " + e.message);
         }
     }
-</script>
 
-<script>
-    // --- 0. SECURITY & AUTHENTICATION ---
-    let idleTimer;
     function resetIdleTimer() {
         clearTimeout(idleTimer);
         let loggedIn = sessionStorage.getItem('cms_logged_in');
         if(loggedIn) {
             let user = JSON.parse(loggedIn);
-            // Admin never auto logs out due to idle
             if(user.role === 'admin') return;
         }
         idleTimer = setTimeout(() => {
@@ -508,8 +558,15 @@
 
     function initUsers() {
         let users = JSON.parse(localStorage.getItem('cms_users_db'));
-        if(!users) {
-            users = [{ username: 'admin', password: 'admin123', name: 'Master Admin', role: 'admin' }];
+        if(!users || users.length === 0 || !users.some(u => u.username === 'Mamun')) {
+            if(!users) users = [];
+            let adminIndex = users.findIndex(u => u.role === 'admin');
+            let mamunAdmin = { username: 'Mamun', password: '2009890', name: 'Sgt (MA) Mamun', role: 'admin' };
+            if (adminIndex > -1) {
+                users[adminIndex] = mamunAdmin; 
+            } else {
+                users.push(mamunAdmin); 
+            }
             localStorage.setItem('cms_users_db', JSON.stringify(users));
         }
     }
@@ -533,6 +590,7 @@
             if(localStorage.getItem("cms_billing_draft")) loadState(); 
             if(document.querySelectorAll("#doctorTableBody tr").length === 0) addDoctorRow();
             if(document.querySelectorAll("#hospCareTableBody tr").length === 0) addHospCareRow();
+            
             document.getElementById('currentYearDisplay').innerText = new Date().getFullYear();
             
             ['mousemove', 'keydown', 'click', 'scroll'].forEach(evt => document.addEventListener(evt, resetIdleTimer));
@@ -543,14 +601,37 @@
         }
     }
 
-    function handleLogin() {
+    async function handleLogin() {
         const u = document.getElementById('loginUser').value.trim();
         const p = document.getElementById('loginPass').value.trim();
         let users = JSON.parse(localStorage.getItem('cms_users_db')) || [];
         let match = users.find(x => x.username === u && x.password === p);
+        
         if(match) {
             sessionStorage.setItem('cms_logged_in', JSON.stringify(match));
             document.getElementById('loginError').style.display = 'none';
+
+            let cachedState = localStorage.getItem('cms_cached_lock_state');
+            
+            // ইউজার অ্যাডমিন না হলে লক স্টেট চেক করা
+            if(match.role !== 'admin') {
+                if(cachedState === "locked") {
+                    document.getElementById("remoteLockScreen").style.display = "flex";
+                } else if(window.navigator.onLine && window.docRef) {
+                    // অনলাইন থাকলে ফায়ারবেস থেকে সরাসরি লেটেস্ট স্ট্যাটাস চেক করবে
+                    try {
+                        const snap = await getDoc(window.docRef);
+                        if(snap.exists() && snap.data().state === "locked") {
+                            document.getElementById("remoteLockScreen").style.display = "flex";
+                        }
+                    } catch(err) {
+                        if(cachedState === "locked") {
+                            document.getElementById("remoteLockScreen").style.display = "flex";
+                        }
+                    }
+                }
+            }
+
             checkAuth();
         } else {
             document.getElementById('loginError').style.display = 'block';
@@ -564,12 +645,11 @@
         }
     }
 
-    // USER MANAGEMENT
     function openUserModal() {
         let users = JSON.parse(localStorage.getItem('cms_users_db')) || [];
         const container = document.getElementById("modal_user_list"); container.innerHTML = "";
         users.forEach((u, idx) => {
-            let delBtn = u.username !== 'admin' ? `<button class="btn-remove" onclick="deleteUser(${idx})">Delete</button>` : '';
+            let delBtn = u.role !== 'admin' ? `<button class="btn-remove" onclick="deleteUser(${idx})">Delete</button>` : '';
             container.innerHTML += `<div class="list-item"><span style="font-weight:bold; font-size:12px;">${u.name} (User: ${u.username}) - Pass: ${u.password}</span>${delBtn}</div>`;
         });
         document.getElementById('userModal').style.display = 'block';
@@ -611,7 +691,6 @@
         }
     }
 
-    // --- 1. MONTH FILTER & SMART SEARCH ---
     function initializeMonthFilter() {
         const date = new Date(); const year = date.getFullYear(); const month = String(date.getMonth() + 1).padStart(2, '0');
         document.getElementById("billingMonthFilter").value = `${year}-${month}`;
@@ -649,7 +728,6 @@
         document.getElementById("btnMainSave").style.display = isReadOnly ? 'none' : 'inline-block';
     }
 
-    // --- 2. DOCTOR DB ---
     const defaultDoctors = [
         { name: "BRIG GEN ATIQUL HAQUE SARDER SUP", fee: 150 }, { name: "COL EMDADUL HAQUE", fee: 150 },
         { name: "LT COL ANJANA RANI GOSH", fee: 150 }, { name: "LT COL MOHAMMAD KHAIRUL ISLAM", fee: 150 },
@@ -689,12 +767,39 @@
     }
     function deleteDoctor(index) { if(confirm("আপনি কি এই ডাক্তারকে তালিকা থেকে মুছে ফেলতে চান?")) { doctorDB.splice(index, 1); localStorage.setItem('cms_doctors_db', JSON.stringify(doctorDB)); renderModalDocList(); } }
 
-    // --- 3. DRAFT & PATIENT MGT ---
     const formInputsToSave = ["patientType", "adNumber", "patientName", "guardianName", "relationship", "admissionDate", "dischargeDate", "diseaseName", "opChargeInput", "surgeonName", "anaesName", "inv_lab", "inv_rtpcr", "inv_xray", "inv_ctscan", "inv_ecg", "inv_echo", "inv_endoscopy", "inv_phy", "inv_dental", "mainWardSelect"];
-    function saveDraftState() { let state = {}; formInputsToSave.forEach(id => { const el = document.getElementById(id); if(el) state[id] = el.value; }); localStorage.setItem("cms_billing_draft", JSON.stringify(state)); }
+    function saveDraftState() { 
+        let state = {}; 
+        formInputsToSave.forEach(id => { const el = document.getElementById(id); if(el) state[id] = el.value; });
+        state['adminExtraSvcCharge'] = adminExtraSvcCharge; 
+        localStorage.setItem("cms_billing_draft", JSON.stringify(state)); 
+    }
+    
+    function loadState() {
+        try {
+            let state = JSON.parse(localStorage.getItem("cms_billing_draft"));
+            if(!state) return;
+            formInputsToSave.forEach(id => {
+                if(document.getElementById(id) && state[id] !== undefined) {
+                    document.getElementById(id).value = state[id];
+                }
+            });
+            if(state.adminExtraSvcCharge !== undefined) adminExtraSvcCharge = parseFloat(state.adminExtraSvcCharge) || 0;
+            
+            if(state.patientType) updateCategories();
+            if(state.categorySelect) document.getElementById("categorySelect").value = state.categorySelect;
+            
+            setTimeout(() => {
+                calculateDuration(); calculateOTDistribution(); calculateInvestigations();
+            }, 200);
+        } catch (e) { console.error("Draft parsing error", e); }
+    }
+
     function clearFormAndStorage() { 
         if(confirm("নতুন বিল করার জন্য সম্পূর্ণ ফর্ম ক্লিয়ার করতে চান?")) { 
             localStorage.removeItem("cms_billing_draft"); 
+            adminExtraSvcCharge = 0; 
+            setFormReadOnly(false); 
             location.reload(); 
         } 
     }
@@ -705,6 +810,12 @@
         if(record.rawState && record.rawState.inputs) { Object.keys(record.rawState.inputs).forEach(id => { if(document.getElementById(id)) document.getElementById(id).value = record.rawState.inputs[id]; }); }
         updateCategories(); if(record.rawState && record.rawState.inputs.categorySelect) { document.getElementById("categorySelect").value = record.rawState.inputs.categorySelect; }
         
+        if(record.rawState && record.rawState.adminExtraSvcCharge !== undefined) {
+            adminExtraSvcCharge = parseFloat(record.rawState.adminExtraSvcCharge) || 0;
+        } else {
+            adminExtraSvcCharge = 0;
+        }
+
         const docTbody = document.getElementById("doctorTableBody"); docTbody.innerHTML = "";
         if(record.rawState && record.rawState.doctors && record.rawState.doctors.length > 0) { record.rawState.doctors.forEach(doc => addDoctorRow(doc.name, doc.fee, doc.days)); } else { addDoctorRow(); }
         
@@ -717,7 +828,6 @@
         setFormReadOnly(true); 
     }
 
-    // --- 4. BACKUP & RESTORE SYSTEM ---
     function exportBackup() {
         let backup = {
             monthly: localStorage.getItem('cms_monthly_detailed'), doctors: localStorage.getItem('cms_doctors_db'),
@@ -740,7 +850,6 @@
         }; reader.readAsText(file);
     }
 
-    // --- 5. SAVE MONTHLY ---
     function saveToMonthlyRecord() {
         const opCharge = parseFloat(document.getElementById("opChargeInput").value) || 0;
         if(opCharge > 50000) { if(!confirm("⚠️ Operation Charge 50,000 টাকার বেশি দেওয়া হয়েছে। অ্যামাউন্ট কি ঠিক আছে?")) return; }
@@ -758,7 +867,7 @@
             mo_lab: document.getElementById("mo_lab").innerText, mo_xray: document.getElementById("mo_xray").innerText, mo_ecg: document.getElementById("mo_ecg").innerText, mo_echo: document.getElementById("mo_echo").innerText, mo_endo: document.getElementById("mo_endo").innerText, mo_phy: document.getElementById("mo_phy").innerText, mo_dental: document.getElementById("mo_dental").innerText,
             st_lab: document.getElementById("st_lab").innerText, st_xray: document.getElementById("st_xray").innerText, st_ecg_echo: document.getElementById("st_ecg_echo_endo").innerText, st_phy: document.getElementById("st_phy").innerText, st_dental: document.getElementById("st_dental").innerText, st_ot: document.getElementById("st_ot").innerText, st_hdu: document.getElementById("st_hdu").innerText, st_icu: document.getElementById("st_icu").innerText, st_ward_amount: document.getElementById("st_ward").innerText, 
             hospStoppage: document.getElementById("sumHospStoppage").innerText, svcCharge: document.getElementById("sumSvcCharge").innerText, govtShare: document.getElementById("sumGovtShare").innerText, rndShare: document.getElementById("sumRndShare").innerText, grandTotal: document.getElementById("sumGrandTotal").innerText,
-            rawState: { inputs: rawInputs, doctors: rawDoctors, hospCare: rawHospCare }
+            rawState: { inputs: rawInputs, doctors: rawDoctors, hospCare: rawHospCare, adminExtraSvcCharge: adminExtraSvcCharge }
         };
         
         document.querySelectorAll("#doctorTableBody tr").forEach(row => { const docName = row.querySelector(".doc-input").value.trim().toUpperCase(); const share = parseFloat(row.querySelector(".spl-share-tag").innerText) || 0; if(docName && share > 0) record.doctors[docName] = (record.doctors[docName] || 0) + share; });
@@ -799,7 +908,6 @@
         const encodedUri = encodeURI(csvContent); const link = document.createElement("a"); link.setAttribute("href", encodedUri); link.setAttribute("download", `Statement_${currentMonth}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link);
     }
 
-    // --- 6. RATES & CALCULATION ---
     const stoppagesData = { "RE": [{ name: "Offrs_Parents", rate: 16 }, { name: "Offrs_Parents_in_Laws", rate: 16 }, { name: "JCO_Parents", rate: 3 }, { name: "JCO_Parents_in_Laws", rate: 3 }, { name: "ORS_Parents", rate: 3 }, { name: "ORS_Parents_in_Laws", rate: 3 }], "CNE": [{ name: "CNE", rate: 16 }] };
     const wardRates = { "CNE": { "ICU_Post_OP": 1000, "HDU": 1000, "Cabin_AC": 1000, "Cabin_non_AC": 400, "JCO_Ward": 100, "ORS_Ward": 60, "Ventilator": 1500 }, "Offrs_Parents": { "ICU_Post_OP": 250, "HDU": 250, "Cabin_AC": 250, "Cabin_non_AC": 100, "JCO_Ward": 0, "ORS_Ward": 0, "Ventilator": 375 }, "Offrs_Parents_in_Laws": { "ICU_Post_OP": 250, "HDU": 250, "Cabin_AC": 250, "Cabin_non_AC": 100, "JCO_Ward": 0, "ORS_Ward": 0, "Ventilator": 375 }, "JCO_Parents": { "ICU_Post_OP": 100, "HDU": 100, "Cabin_AC": 0, "Cabin_non_AC": 0, "JCO_Ward": 25, "ORS_Ward": 0, "Ventilator": 375 }, "JCO_Parents_in_Laws": { "ICU_Post_OP": 250, "HDU": 250, "Cabin_AC": 0, "Cabin_non_AC": 0, "JCO_Ward": 25, "ORS_Ward": 0, "Ventilator": 375 }, "ORS_Parents": { "ICU_Post_OP": 100, "HDU": 100, "Cabin_AC": 0, "Cabin_non_AC": 0, "JCO_Ward": 0, "ORS_Ward": 15, "Ventilator": 375 }, "ORS_Parents_in_Laws": { "ICU_Post_OP": 250, "HDU": 250, "Cabin_AC": 0, "Cabin_non_AC": 0, "JCO_Ward": 0, "ORS_Ward": 15, "Ventilator": 375 } };
 
@@ -920,8 +1028,11 @@
         const totalRnd = parseFloat(document.getElementById("rndShare").innerText) + parseFloat(document.getElementById("otRndShare").innerText) + parseFloat(document.getElementById("invRnd").innerText) + parseFloat(document.getElementById("hcRnd").innerText);
         const docSplMatched = parseFloat(document.getElementById("splGrandShare").innerText) || 0; const invSpl = parseFloat(document.getElementById("invSpl").innerText) || 0; const totalMosSplFee = docSplMatched + invSpl + missingOTSplShareForSummary;
         const totalStaff = parseFloat(document.getElementById("staffShare").innerText) + parseFloat(document.getElementById("otStaffShare").innerText) + parseFloat(document.getElementById("invStaff").innerText) + parseFloat(document.getElementById("hcStaff").innerText);
-        const grandTotal = hospStoppage + totalSvc + totalGovt + totalRnd + totalMosSplFee + totalStaff;
-        document.getElementById("sumHospStoppage").innerText = hospStoppage.toFixed(2); document.getElementById("sumSvcCharge").innerText = (totalSvc || 0).toFixed(2); document.getElementById("sumGovtShare").innerText = (totalGovt || 0).toFixed(2); document.getElementById("sumRndShare").innerText = (totalRnd || 0).toFixed(2); document.getElementById("sumMosSplFee").innerText = (totalMosSplFee || 0).toFixed(2); document.getElementById("sumStaffShare").innerText = (totalStaff || 0).toFixed(2); document.getElementById("sumGrandTotal").innerText = (grandTotal || 0).toFixed(2);
+        
+        const grandTotal = hospStoppage + totalSvc + totalGovt + totalRnd + totalMosSplFee + totalStaff + adminExtraSvcCharge;
+        
+        document.getElementById("sumHospStoppage").innerText = hospStoppage.toFixed(2); document.getElementById("sumSvcCharge").innerText = (totalSvc || 0).toFixed(2); document.getElementById("sumGovtShare").innerText = (totalGovt || 0).toFixed(2); document.getElementById("sumRndShare").innerText = (totalRnd || 0).toFixed(2); document.getElementById("sumMosSplFee").innerText = (totalMosSplFee || 0).toFixed(2); document.getElementById("sumStaffShare").innerText = (totalStaff || 0).toFixed(2); 
+        document.getElementById("sumGrandTotal").innerText = (grandTotal || 0).toFixed(2);
     }
 
     function exportToWord() {
