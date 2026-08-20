@@ -764,8 +764,8 @@
         setFormReadOnly(true); 
     }
 
-    // ==========================================
-    // DATA SAVE & CLOUD SYNC ENGINE (RESTORED)
+ // ==========================================
+    // DATA SAVE & CLOUD SYNC ENGINE (DOUBLE-COUNT BUG FIXED)
     // ==========================================
     window.saveToMonthlyRecord = function() {
         const opCharge = parseFloat(document.getElementById("opChargeInput").value) || 0;
@@ -787,11 +787,37 @@
             rawState: { inputs: rawInputs, doctors: rawDoctors, hospCare: rawHospCare, adminExtraSvcCharge: adminExtraSvcCharge }
         };
         
-        document.querySelectorAll("#doctorTableBody tr").forEach(row => { const docName = row.querySelector(".doc-input").value.trim().toUpperCase(); const share = parseFloat(row.querySelector(".spl-share-tag").innerText) || 0; if(docName && share > 0) record.doctors[docName] = (record.doctors[docName] || 0) + share; });
-        const surgName = document.getElementById("surgeonName").value.trim().toUpperCase(); const surgShare = parseFloat(document.getElementById("surgeonShare").innerText) || 0;
-        if(surgName && surgShare > 0) record.doctors[surgName] = (record.doctors[surgName] || 0) + surgShare;
-        const anaesName = document.getElementById("anaesName").value.trim().toUpperCase(); const anaesShare = parseFloat(document.getElementById("anaesShare").innerText) || 0;
-        if(anaesName && anaesShare > 0) record.doctors[anaesName] = (record.doctors[anaesName] || 0) + anaesShare;
+        // -----------------------------------------------------
+        // BUG FIX: Smart OT Distribution (Preventing Double Count)
+        // -----------------------------------------------------
+        const surgName = document.getElementById("surgeonName").value.trim().toUpperCase(); 
+        const surgShare = parseFloat(document.getElementById("surgeonShare").innerText) || 0;
+        const anaesName = document.getElementById("anaesName").value.trim().toUpperCase(); 
+        const anaesShare = parseFloat(document.getElementById("anaesShare").innerText) || 0;
+
+        let isSurgMatched = false;
+        let isAnaesMatched = false;
+
+        document.querySelectorAll("#doctorTableBody tr").forEach(row => { 
+            const docName = row.querySelector(".doc-input").value.trim().toUpperCase(); 
+            const share = parseFloat(row.querySelector(".spl-share-tag").innerText) || 0; 
+            
+            if(docName && share > 0) {
+                record.doctors[docName] = (record.doctors[docName] || 0) + share; 
+            }
+            
+            // চেক করা হচ্ছে সার্জন বা অ্যানেস্থেটিস্ট মূল টেবিলে আছে কি না
+            if (docName !== "") {
+                if (surgName !== "" && docName === surgName && !isSurgMatched) { isSurgMatched = true; }
+                if (anaesName !== "" && docName === anaesName && !isAnaesMatched) { isAnaesMatched = true; }
+            }
+        });
+
+        // যদি তারা মূল টেবিলে না থাকে, তবেই এক্সট্রা যোগ হবে (ডাবল কাউন্টিং রোধ)
+        if(surgName && surgShare > 0 && !isSurgMatched) record.doctors[surgName] = (record.doctors[surgName] || 0) + surgShare;
+        if(anaesName && anaesShare > 0 && !isAnaesMatched) record.doctors[anaesName] = (record.doctors[anaesName] || 0) + anaesShare;
+
+        // -----------------------------------------------------
 
         let monthlyData = JSON.parse(localStorage.getItem('cms_monthly_detailed')) || []; let existingIndex = monthlyData.findIndex(r => String(r.adNo) === String(adNo));
         if(existingIndex >= 0) { monthlyData[existingIndex] = record; alert("✅ বিলটি সফলভাবে আপডেট হয়েছে!"); } else { monthlyData.push(record); alert(`✅ বিলটি সফলভাবে ${getCurrentFilterMonth()} মাসের খাতায় সেভ হয়েছে!`); }
