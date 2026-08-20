@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Billing & Management (Cloud Secured)</title>
     
-    <!-- Firebase SDKs (v10 Modular) with Offline Persistence & Bug Fixes -->
+    <!-- Firebase SDKs (v10 Modular) -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, doc, getDoc, setDoc, onSnapshot, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, setPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
         const firebaseConfig = {
             apiKey: "AIzaSyCqp5idVBbUpKIpbqgTNzi8wd_uYu2g1IQ",
@@ -29,14 +29,15 @@
         
         window.db = db;
         window.auth = auth;
-        window.firestoreGetDoc = getDoc; // এক্সেল এক্সপোর্টের জন্য গ্লোবাল করা হলো
+        window.firestoreGetDoc = getDoc; 
+        window.firestoreSetDoc = setDoc; 
         window.firestoreDoc = doc;
         window.docRef = doc(db, "app_settings", "status");
 
-        let isIntentionallyLoggedOut = false; // লগ-আউট বাগ ফিক্সের জন্য ফ্ল্যাগ
+        let isIntentionallyLoggedOut = false; 
         let unsubLock = null;
 
-        // ১. রিয়েল-টাইম সেশন ট্র্যাকার (স্মার্ট নেম এক্সট্রাক্টর)
+        // ১. রিয়েল-টাইম সেশন ট্র্যাকার
         onAuthStateChanged(auth, async (user) => {
             const loginContainer = document.getElementById('loginContainer');
             const appContainer = document.getElementById('appContainer');
@@ -44,8 +45,6 @@
             if (user) {
                 isIntentionallyLoggedOut = false;
                 let role = 'user';
-                
-                // ইমেইল থেকে অটোমেটিক নাম বের করা
                 let rawName = user.email.split('@')[0];
                 let name = rawName.charAt(0).toUpperCase() + rawName.slice(1);
 
@@ -54,7 +53,7 @@
                     const adminSnap = await getDoc(adminRef);
                     if (adminSnap.exists() && adminSnap.data().role === 'admin') {
                         role = 'admin';
-                        name = 'Sgt (MA) Mamun'; // অ্যাডমিনের কাস্টম নাম
+                        name = 'Sgt (MA) Mamun'; 
                     }
                 } catch(e) {}
                 
@@ -72,7 +71,7 @@
             }
         });
 
-        // ২. রিমোট লক লিসেনার (লগ-আউট বাগ ফিক্সড)
+        // ২. রিমোট লক লিসেনার 
         function setupLockListener(isAdmin) {
             if(unsubLock) unsubLock();
             unsubLock = onSnapshot(window.docRef, (docSnap) => {
@@ -88,15 +87,16 @@
             });
         }
 
-        // ৩. সিকিউর লগ-ইন
+        // ৩. সিকিউর লগ-ইন (সেশন পারসিস্টেন্স সহ)
         window.handleLogin = async function() {
             const email = document.getElementById('loginEmail').value; 
             const pass = document.getElementById('loginPass').value;
             const errorMsg = document.getElementById('loginError');
-
             if(!email || !pass) return errorMsg.style.display = 'block';
-
+            
             try {
+                // ব্রাউজার ক্লোজ করলে অটো লগ-আউট হওয়ার লজিক
+                await setPersistence(auth, browserSessionPersistence);
                 await signInWithEmailAndPassword(auth, email, pass);
                 errorMsg.style.display = 'none';
             } catch (error) {
@@ -105,7 +105,7 @@
             }
         }
 
-        // ৪. লগ-আউট (ক্লিন এক্সিট)
+        // ৪. লগ-আউট 
         window.handleLogout = async function() {
             if(confirm("আপনি কি লগআউট করতে চান?")) {
                 isIntentionallyLoggedOut = true;
@@ -126,25 +126,6 @@
                 alert("অ্যাক্সেস ডিনাইড!");
             }
         }
-
-        // ৬. অটো-ক্লাউড ব্যাকআপ হাইজ্যাকার
-        setTimeout(() => {
-            if(typeof window.saveToMonthlyRecord === 'function') {
-                const originalSave = window.saveToMonthlyRecord;
-                window.saveToMonthlyRecord = async function() {
-                    originalSave();
-                    try {
-                        const localData = localStorage.getItem('cms_monthly_detailed');
-                        if(localData) {
-                            await setDoc(doc(db, "patients", "billing_backup"), {
-                                payload: localData,
-                                last_synced: new Date().toISOString()
-                            }, { merge: true });
-                        }
-                    } catch(e) { }
-                }
-            }
-        }, 1000);
     </script>
 
     <style>
@@ -297,7 +278,7 @@
         </div>
     </div>
 
-    <!-- PATIENT MANAGEMENT MODAL -->
+    <!-- PATIENT MANAGEMENT MODAL (RESTORED) -->
     <div id="patientModal" class="modal">
         <div class="modal-content">
             <div class="modal-header"><h3>👥 পেশেন্ট ম্যানেজমেন্ট</h3><span class="close-btn" onclick="closePatientModal()">&times;</span></div>
@@ -318,7 +299,6 @@
                 <datalist id="patientSearchList"></datalist>
             </div>
             <div class="nav-buttons">
-                <!-- Backup & Restore Buttons Removed -->
                 <button class="btn-sm btn-manage-pat admin-only" onclick="openPatientModal()">👥 Manage Patients</button>
                 <button class="btn-sm btn-manage-doc admin-only" onclick="openDocModal()">👨‍⚕️ Doctors</button>
                 <button class="btn-sm btn-monthly admin-only" onclick="downloadMonthlyCSV()">📅 Export Excel</button>
@@ -604,6 +584,49 @@
         }, 15 * 60 * 1000);
     }
 
+    // ==========================================
+    // PATIENT MANAGEMENT FUNCTIONS (RESTORED)
+    // ==========================================
+    window.openPatientModal = function() {
+        let allData = JSON.parse(localStorage.getItem('cms_monthly_detailed')) || [];
+        const currentMonth = getCurrentFilterMonth();
+        let monthData = allData.filter(r => r.billingMonth === currentMonth);
+        
+        document.getElementById("modalMonthDisplay").innerText = currentMonth;
+        const container = document.getElementById("modal_patient_list");
+        container.innerHTML = "";
+        
+        if(monthData.length === 0) {
+            container.innerHTML = `<p style="text-align:center; padding: 10px;">এই মাসে কোনো পেশেন্ট নেই।</p>`;
+        } else {
+            monthData.forEach((p) => {
+                container.innerHTML += `<div class="list-item"><span style="font-weight:bold; font-size:12px;">${p.adNo} - ${p.pName}</span><button class="btn-remove" onclick="deletePatient('${p.adNo}')">Delete</button></div>`;
+            });
+        }
+        document.getElementById('patientModal').style.display = 'block';
+    }
+    
+    window.closePatientModal = function() { document.getElementById('patientModal').style.display = 'none'; }
+    
+    window.deletePatient = function(adNo) {
+        if(confirm("আপনি কি নিশ্চিত যে এই পেশেন্টের সম্পূর্ণ বিল মুছে ফেলতে চান?")) {
+            let allData = JSON.parse(localStorage.getItem('cms_monthly_detailed')) || [];
+            allData = allData.filter(r => String(r.adNo) !== String(adNo));
+            localStorage.setItem('cms_monthly_detailed', JSON.stringify(allData));
+            updateSearchDatalist();
+            openPatientModal();
+            // Cloud Sync
+            try {
+                if (window.firestoreDoc && window.db) {
+                    window.firestoreSetDoc(window.firestoreDoc(window.db, "patients", "billing_backup"), {
+                        payload: JSON.stringify(allData),
+                        last_synced: new Date().toISOString()
+                    }, { merge: true });
+                }
+            } catch(e) {}
+        }
+    }
+
     function initializeMonthFilter() {
         const date = new Date(); const year = date.getFullYear(); const month = String(date.getMonth() + 1).padStart(2, '0');
         document.getElementById("billingMonthFilter").value = `${year}-${month}`;
@@ -739,6 +762,54 @@
         
         calculateDuration(); calculateOTDistribution(); calculateInvestigations(); 
         setFormReadOnly(true); 
+    }
+
+    // ==========================================
+    // DATA SAVE & CLOUD SYNC ENGINE (RESTORED)
+    // ==========================================
+    window.saveToMonthlyRecord = function() {
+        const opCharge = parseFloat(document.getElementById("opChargeInput").value) || 0;
+        if(opCharge > 50000) { if(!confirm("⚠️ Operation Charge 50,000 টাকার বেশি দেওয়া হয়েছে। অ্যামাউন্ট কি ঠিক আছে?")) return; }
+
+        const adNo = document.getElementById("adNumber").value.trim(); const pName = document.getElementById("patientName").value.trim();
+        if(!adNo || !pName) { alert("❌ অনুগ্রহ করে A&D NO এবং রোগীর নাম পূরণ করুন!"); return; }
+        
+        let loggedIn = JSON.parse(sessionStorage.getItem('cms_logged_in'));
+        let rawInputs = {}; formInputsToSave.forEach(id => { if(document.getElementById(id)) rawInputs[id] = document.getElementById(id).value; });
+        let rawDoctors = []; document.querySelectorAll("#doctorTableBody tr").forEach(tr => { rawDoctors.push({ name: tr.querySelector(".doc-input").value, fee: tr.querySelector(".doc-fee").value, days: tr.querySelector(".doc-days").value }); });
+        let rawHospCare = []; document.querySelectorAll("#hospCareTableBody tr").forEach(tr => { rawHospCare.push({ ward: tr.querySelector(".hc-ward-select").value, days: tr.querySelector(".hc-days").value }); });
+
+        const record = {
+            billingMonth: getCurrentFilterMonth(), date: new Date().toLocaleDateString('en-GB'), adNo: adNo, pName: pName, mainWard: document.getElementById("mainWardSelect").value, doctors: {}, preparedBy: loggedIn ? loggedIn.name : "Admin",
+            mo_lab: document.getElementById("mo_lab").innerText, mo_xray: document.getElementById("mo_xray").innerText, mo_ecg: document.getElementById("mo_ecg").innerText, mo_echo: document.getElementById("mo_echo").innerText, mo_endo: document.getElementById("mo_endo").innerText, mo_phy: document.getElementById("mo_phy").innerText, mo_dental: document.getElementById("mo_dental").innerText,
+            st_lab: document.getElementById("st_lab").innerText, st_xray: document.getElementById("st_xray").innerText, st_ecg_echo: document.getElementById("st_ecg_echo_endo").innerText, st_phy: document.getElementById("st_phy").innerText, st_dental: document.getElementById("st_dental").innerText, st_ot: document.getElementById("st_ot").innerText, st_hdu: document.getElementById("st_hdu").innerText, st_icu: document.getElementById("st_icu").innerText, st_ward_amount: document.getElementById("st_ward").innerText, 
+            hospStoppage: document.getElementById("sumHospStoppage").innerText, svcCharge: document.getElementById("sumSvcCharge").innerText, govtShare: document.getElementById("sumGovtShare").innerText, rndShare: document.getElementById("sumRndShare").innerText, grandTotal: document.getElementById("sumGrandTotal").innerText,
+            rawState: { inputs: rawInputs, doctors: rawDoctors, hospCare: rawHospCare, adminExtraSvcCharge: adminExtraSvcCharge }
+        };
+        
+        document.querySelectorAll("#doctorTableBody tr").forEach(row => { const docName = row.querySelector(".doc-input").value.trim().toUpperCase(); const share = parseFloat(row.querySelector(".spl-share-tag").innerText) || 0; if(docName && share > 0) record.doctors[docName] = (record.doctors[docName] || 0) + share; });
+        const surgName = document.getElementById("surgeonName").value.trim().toUpperCase(); const surgShare = parseFloat(document.getElementById("surgeonShare").innerText) || 0;
+        if(surgName && surgShare > 0) record.doctors[surgName] = (record.doctors[surgName] || 0) + surgShare;
+        const anaesName = document.getElementById("anaesName").value.trim().toUpperCase(); const anaesShare = parseFloat(document.getElementById("anaesShare").innerText) || 0;
+        if(anaesName && anaesShare > 0) record.doctors[anaesName] = (record.doctors[anaesName] || 0) + anaesShare;
+
+        let monthlyData = JSON.parse(localStorage.getItem('cms_monthly_detailed')) || []; let existingIndex = monthlyData.findIndex(r => String(r.adNo) === String(adNo));
+        if(existingIndex >= 0) { monthlyData[existingIndex] = record; alert("✅ বিলটি সফলভাবে আপডেট হয়েছে!"); } else { monthlyData.push(record); alert(`✅ বিলটি সফলভাবে ${getCurrentFilterMonth()} মাসের খাতায় সেভ হয়েছে!`); }
+        
+        localStorage.setItem('cms_monthly_detailed', JSON.stringify(monthlyData)); 
+        updateSearchDatalist();
+
+        // 🚀 Cloud Sync Trigger
+        try {
+            if (window.firestoreDoc && window.db) {
+                const localData = localStorage.getItem('cms_monthly_detailed');
+                window.firestoreSetDoc(window.firestoreDoc(window.db, "patients", "billing_backup"), {
+                    payload: localData,
+                    last_synced: new Date().toISOString()
+                }, { merge: true });
+                console.log("Data synced to Cloud");
+            }
+        } catch(e) { console.log("Offline backup queued"); }
     }
 
     // ক্লাউড ইন্টিগ্রেটেড এক্সেল এক্সপোর্ট ইঞ্জিন
@@ -959,6 +1030,10 @@
         const blob = new Blob(['\ufeff', finalHTML], { type: 'application/msword' }); const url = URL.createObjectURL(blob);
         const link = document.createElement('a'); link.href = url; link.download = fileName; document.body.appendChild(link); link.click(); document.body.removeChild(link);
     }
+
+    window.onload = function() {
+        if(typeof window.initAppUI === 'function') window.initAppUI();
+    };
 </script>
 
 </body>
