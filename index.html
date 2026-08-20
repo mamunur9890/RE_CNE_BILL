@@ -1,17 +1,9 @@
-<!DOCTYPE html>
-<html lang="bn">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hospital Billing & Management (Remote Secured)</title>
-    
-    <!-- Firebase SDKs (v10 Modular) with Offline Persistence -->
+<!-- Firebase SDKs (v10 Modular) with Offline Persistence & Name Fix -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, doc, getDoc, setDoc, onSnapshot, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
-        // আপনার আসল API Config
         const firebaseConfig = {
             apiKey: "AIzaSyCqp5idVBbUpKIpbqgTNzi8wd_uYu2g1IQ",
             authDomain: "hospital-cloud-billing.firebaseapp.com",
@@ -23,8 +15,6 @@
         };
 
         const app = initializeApp(firebaseConfig);
-        
-        // দ্য মাস্টারস্ট্রোক: ফায়ারবেস অফলাইন ক্যাশ (ইন্টারনেট ছাড়া কাজ করার মেকানিজম)
         const db = initializeFirestore(app, {
             localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})
         });
@@ -34,25 +24,28 @@
         window.auth = auth;
         window.docRef = doc(db, "app_settings", "status");
 
-        // ১. রিয়েল-টাইম সেশন ট্র্যাকার ও ব্রিজ
+        // ১. রিয়েল-টাইম সেশন ট্র্যাকার (স্মার্ট নেম এক্সট্রাক্টর সহ)
         onAuthStateChanged(auth, async (user) => {
             const loginContainer = document.getElementById('loginContainer');
             const appContainer = document.getElementById('appContainer');
             
             if (user) {
                 let role = 'user';
-                let name = 'Staff';
+                
+                // ইমেইল থেকে অটোমেটিক নাম বের করা (যেমন: habib@gmail.com -> Habib)
+                let rawName = user.email.split('@')[0];
+                let name = rawName.charAt(0).toUpperCase() + rawName.slice(1);
+
                 try {
-                    // অফলাইনেও ক্যাশ থেকে অ্যাডমিন চেক করবে
                     const adminRef = doc(db, "admins", user.uid);
                     const adminSnap = await getDoc(adminRef);
                     if (adminSnap.exists() && adminSnap.data().role === 'admin') {
                         role = 'admin';
-                        name = 'Admin';
+                        // আপনি চাইলে নিচের নামটি আপনার পছন্দমতো পরিবর্তন করতে পারেন
+                        name = 'Sgt (MA) Mamun'; 
                     }
                 } catch(e) {}
                 
-                // পুরোনো সিস্টেমকে চালু রাখার জন্য লোকাল সেশন মক করা
                 sessionStorage.setItem('cms_logged_in', JSON.stringify({
                     username: user.email,
                     name: name,
@@ -62,10 +55,8 @@
                 loginContainer.style.display = 'none';
                 appContainer.style.display = 'block';
                 
-                // পুরোনো UI ইনিশিয়ালাইজ করা
-                if(typeof window.initAppUI === 'function') {
-                    window.initAppUI();
-                }
+                if(typeof window.initAppUI === 'function') window.initAppUI();
+                
                 setupLockListener(role === 'admin');
             } else {
                 sessionStorage.removeItem('cms_logged_in');
@@ -74,20 +65,16 @@
             }
         });
 
-        // ২. রিমোট লক লিসেনার (অফলাইনেও কাজ করবে)
+        // ২. রিমোট লক লিসেনার
         function setupLockListener(isAdmin) {
             onSnapshot(window.docRef, (docSnap) => {
                 const lockScreen = document.getElementById("remoteLockScreen");
                 if (docSnap.exists()) {
                     const data = docSnap.data();
-                    if (data.state === "locked" && !isAdmin) {
-                        lockScreen.style.display = "flex";
-                    } else {
-                        lockScreen.style.display = "none";
-                    }
+                    if (data.state === "locked" && !isAdmin) lockScreen.style.display = "flex";
+                    else lockScreen.style.display = "none";
                 }
             }, (error) => {
-                // ইন্টারনেট না থাকলে এবং ক্যাশে এক্সেস না পেলে লক স্ক্রিন দেখাবে
                 document.getElementById("remoteLockScreen").style.display = "flex";
             });
         }
@@ -98,11 +85,7 @@
             const pass = document.getElementById('loginPass').value;
             const errorMsg = document.getElementById('loginError');
 
-            if(!email || !pass) {
-                errorMsg.innerText = "ইমেইল এবং পাসওয়ার্ড দিন!";
-                errorMsg.style.display = 'block';
-                return;
-            }
+            if(!email || !pass) return errorMsg.style.display = 'block';
 
             try {
                 await signInWithEmailAndPassword(auth, email, pass);
@@ -120,7 +103,7 @@
             }
         }
 
-        // ৫. রিমোট লক টগল (শুধু অ্যাডমিনের জন্য)
+        // ৫. রিমোট লক টগল
         window.toggleRemoteLock = async function() {
             if(!window.docRef) return;
             try {
@@ -131,19 +114,16 @@
                 await setDoc(window.docRef, { state: newState }, { merge: true });
                 alert(newState === "locked" ? "🔒 সিস্টেম লক করা হয়েছে!" : "🔓 সিস্টেম আনলক করা হয়েছে!");
             } catch(e) {
-                alert("অ্যাক্সেস ডিনাইড! ফায়ারওয়াল আপনাকে আটকে দিয়েছে।");
+                alert("অ্যাক্সেস ডিনাইড!");
             }
         }
 
-        // ৬. অটো-ক্লাউড ব্যাকআপ হাইজ্যাকার (অফলাইন টু অনলাইন সিঙ্ক)
+        // ৬. অটো-ক্লাউড ব্যাকআপ হাইজ্যাকার
         setTimeout(() => {
             if(typeof window.saveToMonthlyRecord === 'function') {
                 const originalSave = window.saveToMonthlyRecord;
                 window.saveToMonthlyRecord = async function() {
-                    // প্রথমে আপনার পুরনো সিস্টেমে লোকালি সেভ করবে
                     originalSave();
-                    
-                    // এরপর ফায়ারবেসে ব্যাকআপ পাঠাবে (ইন্টারনেট না থাকলে বাফারে জমা থাকবে)
                     try {
                         const localData = localStorage.getItem('cms_monthly_detailed');
                         if(localData) {
@@ -151,11 +131,8 @@
                                 payload: localData,
                                 last_synced: new Date().toISOString()
                             }, { merge: true });
-                            console.log("✅ Data queued for Cloud Sync!");
                         }
-                    } catch(e) {
-                        console.log("⚠️ Offline mode: Data will sync automatically when online.");
-                    }
+                    } catch(e) { }
                 }
             }
         }, 1000);
