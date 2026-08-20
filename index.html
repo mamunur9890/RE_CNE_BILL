@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Billing & Management (Cloud Secured)</title>
     
-    <!-- Firebase SDKs (v10 Modular) with All Fixes & UX Enhancements -->
+    <!-- Firebase SDKs (v10 Modular) -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, doc, getDoc, setDoc, onSnapshot, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -87,13 +87,12 @@
             });
         }
 
-        // ৩. সিকিউর লগ-ইন (সেশন পারসিস্টেন্স সহ - ব্রাউজার কাটলে লগআউট)
+        // ৩. সিকিউর লগ-ইন
         window.handleLogin = async function() {
             const email = document.getElementById('loginEmail').value; 
             const pass = document.getElementById('loginPass').value;
             const errorMsg = document.getElementById('loginError');
             if(!email || !pass) return errorMsg.style.display = 'block';
-            
             try {
                 await setPersistence(auth, browserSessionPersistence);
                 await signInWithEmailAndPassword(auth, email, pass);
@@ -108,7 +107,7 @@
         window.handleLogout = async function() {
             if(confirm("আপনি কি লগআউট করতে চান?")) {
                 isIntentionallyLoggedOut = true;
-                localStorage.removeItem("cms_billing_draft"); // ড্রাফ্ট ক্লিয়ার
+                localStorage.removeItem("cms_billing_draft");
                 try { await signOut(auth); } catch (error) { alert("লগ-আউট করতে সমস্যা হয়েছে।"); }
             }
         }
@@ -530,7 +529,6 @@
         setTimeout(() => { document.body.classList.remove('voucher-mode'); }, 500); 
     }
 
-    // --- 0. UI INITIALIZATION & EXTRA LOGIC ---
     let idleTimer;
     let adminExtraSvcCharge = 0; 
 
@@ -702,9 +700,13 @@
     function deleteDoctor(index) { if(confirm("আপনি কি এই ডাক্তারকে তালিকা থেকে মুছে ফেলতে চান?")) { doctorDB.splice(index, 1); localStorage.setItem('cms_doctors_db', JSON.stringify(doctorDB)); renderModalDocList(); } }
 
     const formInputsToSave = ["patientType", "adNumber", "patientName", "guardianName", "relationship", "admissionDate", "dischargeDate", "diseaseName", "opChargeInput", "surgeonName", "anaesName", "inv_lab", "inv_rtpcr", "inv_xray", "inv_ctscan", "inv_ecg", "inv_echo", "inv_endoscopy", "inv_phy", "inv_dental", "mainWardSelect"];
+    
     function saveDraftState() { 
         let state = {}; 
         formInputsToSave.forEach(id => { const el = document.getElementById(id); if(el) state[id] = el.value; });
+        // ক্যাটাগরি এবং রোগীর টাইপ explicitly সেভ করা হচ্ছে (বাগ ফিক্স)
+        state['patientType'] = document.getElementById("patientType").value;
+        state['categorySelect'] = document.getElementById("categorySelect").value;
         state['adminExtraSvcCharge'] = adminExtraSvcCharge; 
         localStorage.setItem("cms_billing_draft", JSON.stringify(state)); 
     }
@@ -713,15 +715,22 @@
         try {
             let state = JSON.parse(localStorage.getItem("cms_billing_draft"));
             if(!state) return;
+            
+            // প্রথমে পেশেন্ট টাইপ এবং ক্যাটাগরি রিস্টোর করা হচ্ছে যাতে ড্রاق্ট ওভাররাইট না হয়
+            if(state.patientType) {
+                document.getElementById("patientType").value = state.patientType;
+                updateCategories();
+            }
+            if(state.categorySelect) {
+                document.getElementById("categorySelect").value = state.categorySelect;
+            }
+
             formInputsToSave.forEach(id => {
                 if(document.getElementById(id) && state[id] !== undefined) {
                     document.getElementById(id).value = state[id];
                 }
             });
             if(state.adminExtraSvcCharge !== undefined) adminExtraSvcCharge = parseFloat(state.adminExtraSvcCharge) || 0;
-            
-            if(state.patientType) updateCategories();
-            if(state.categorySelect) document.getElementById("categorySelect").value = state.categorySelect;
             
             setTimeout(() => {
                 calculateDuration(); calculateOTDistribution(); calculateInvestigations();
@@ -763,7 +772,7 @@
     }
 
     // ==========================================
-    // DATA SAVE & CLOUD SYNC ENGINE (DOUBLE-COUNT BUG FIXED)
+    // DATA SAVE & CLOUD SYNC ENGINE (FIXED)
     // ==========================================
     window.saveToMonthlyRecord = function() {
         const opCharge = parseFloat(document.getElementById("opChargeInput").value) || 0;
@@ -774,6 +783,10 @@
         
         let loggedIn = JSON.parse(sessionStorage.getItem('cms_logged_in'));
         let rawInputs = {}; formInputsToSave.forEach(id => { if(document.getElementById(id)) rawInputs[id] = document.getElementById(id).value; });
+        // ক্যাটাগরি ও পেশেন্ট টাইপ র এজস্টেটে সেভ করা হচ্ছে
+        rawInputs['patientType'] = document.getElementById("patientType").value;
+        rawInputs['categorySelect'] = document.getElementById("categorySelect").value;
+
         let rawDoctors = []; document.querySelectorAll("#doctorTableBody tr").forEach(tr => { rawDoctors.push({ name: tr.querySelector(".doc-input").value, fee: tr.querySelector(".doc-fee").value, days: tr.querySelector(".doc-days").value }); });
         let rawHospCare = []; document.querySelectorAll("#hospCareTableBody tr").forEach(tr => { rawHospCare.push({ ward: tr.querySelector(".hc-ward-select").value, days: tr.querySelector(".hc-days").value }); });
 
@@ -816,7 +829,6 @@
         localStorage.setItem('cms_monthly_detailed', JSON.stringify(monthlyData)); 
         updateSearchDatalist();
 
-        // 🚀 Cloud Sync Trigger
         try {
             if (window.firestoreDoc && window.db) {
                 const localData = localStorage.getItem('cms_monthly_detailed');
@@ -824,12 +836,11 @@
                     payload: localData,
                     last_synced: new Date().toISOString()
                 }, { merge: true });
-                console.log("Data synced to Cloud");
             }
-        } catch(e) { console.log("Offline backup queued"); }
+        } catch(e) {}
     }
 
-    // ক্লাউড ইন্টিগ্রেটেড এক্সেল এক্সপোর্ট ইঞ্জিন
+    // ক্লাউড ইন্টিগ্রেটেড এক্সেল এক্সপোর্ট ইঞ্জিন (পয়সা সাম ফিক্সড)
     window.downloadMonthlyCSV = async function() {
         const currentMonth = getCurrentFilterMonth();
         let allData = [];
@@ -875,9 +886,18 @@
     const wardRates = { "CNE": { "ICU_Post_OP": 1000, "HDU": 1000, "Cabin_AC": 1000, "Cabin_non_AC": 400, "JCO_Ward": 100, "ORS_Ward": 60, "Ventilator": 1500 }, "Offrs_Parents": { "ICU_Post_OP": 250, "HDU": 250, "Cabin_AC": 250, "Cabin_non_AC": 100, "JCO_Ward": 0, "ORS_Ward": 0, "Ventilator": 375 }, "Offrs_Parents_in_Laws": { "ICU_Post_OP": 250, "HDU": 250, "Cabin_AC": 250, "Cabin_non_AC": 100, "JCO_Ward": 0, "ORS_Ward": 0, "Ventilator": 375 }, "JCO_Parents": { "ICU_Post_OP": 100, "HDU": 100, "Cabin_AC": 0, "Cabin_non_AC": 0, "JCO_Ward": 25, "ORS_Ward": 0, "Ventilator": 375 }, "JCO_Parents_in_Laws": { "ICU_Post_OP": 250, "HDU": 250, "Cabin_AC": 0, "Cabin_non_AC": 0, "JCO_Ward": 25, "ORS_Ward": 0, "Ventilator": 375 }, "ORS_Parents": { "ICU_Post_OP": 100, "HDU": 100, "Cabin_AC": 0, "Cabin_non_AC": 0, "JCO_Ward": 0, "ORS_Ward": 15, "Ventilator": 375 }, "ORS_Parents_in_Laws": { "ICU_Post_OP": 250, "HDU": 250, "Cabin_AC": 0, "Cabin_non_AC": 0, "JCO_Ward": 0, "ORS_Ward": 15, "Ventilator": 375 } };
 
     function updateCategories() {
-        const type = document.getElementById("patientType").value; const catSelect = document.getElementById("categorySelect"); catSelect.innerHTML = "";
-        stoppagesData[type].forEach(item => { let opt = document.createElement("option"); opt.value = item.name; opt.setAttribute("data-rate", item.rate); opt.innerHTML = item.name; catSelect.appendChild(opt); }); onCategoryChange();
+        const type = document.getElementById("patientType").value; const catSelect = document.getElementById("categorySelect"); 
+        let currentCat = catSelect.value; // বর্তমান সিলেক্ট করা ক্যাটাগরি ধরে রাখা হচ্ছে
+        catSelect.innerHTML = "";
+        stoppagesData[type].forEach(item => { let opt = document.createElement("option"); opt.value = item.name; opt.setAttribute("data-rate", item.rate); opt.innerHTML = item.name; catSelect.appendChild(opt); }); 
+        
+        // যদি আগের ক্যাটাগরি নতুন টাইপে থাকে তবে সেটি রি-সিলেক্ট করা
+        if(currentCat && Array.from(catSelect.options).some(o => o.value === currentCat)) {
+            catSelect.value = currentCat;
+        }
+        onCategoryChange();
     }
+    
     function onCategoryChange() { const catSelect = document.getElementById("categorySelect"); if(catSelect.options[catSelect.selectedIndex]) { document.getElementById("dailyRate").value = catSelect.options[catSelect.selectedIndex].getAttribute("data-rate"); calculateHospStoppage(); } recalculateAllHospCareRows(); }
     
     function calculateDuration() {
@@ -1045,7 +1065,7 @@
         const link = document.createElement('a'); link.href = url; link.download = fileName; document.body.appendChild(link); link.click(); document.body.removeChild(link);
     }
 
-    // 🚀 UX Enhancement: Auto-select or clear '0' on input focus
+    // UX Enhancement: Auto-select or clear '0' on input focus
     document.addEventListener("focusin", function(e) {
         if (e.target.tagName === "INPUT" && e.target.type === "number") {
             if (e.target.value === "0" || e.target.value === "0.00") {
