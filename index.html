@@ -5,12 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Billing & Management (Remote Secured)</title>
     
-    <!-- Firebase SDKs (v10 Modular) - Single Script Block -->
+    <!-- Firebase SDKs (v10 Modular) -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
+        // আপনার আসল API Config
         const firebaseConfig = {
             apiKey: "AIzaSyCqp5idVBbUpKIpbqgTNzi8wd_uYu2g1IQ",
             authDomain: "hospital-cloud-billing.firebaseapp.com",
@@ -29,32 +30,52 @@
         window.auth = auth;
         window.docRef = doc(db, "app_settings", "status");
 
-        // ১. রিয়েল-টাইম সেশন ট্র্যাকার
-        onAuthStateChanged(auth, (user) => {
+        // ১. রিয়েল-টাইম সেশন ট্র্যাকার ও ব্রিজ
+        onAuthStateChanged(auth, async (user) => {
             const loginContainer = document.getElementById('loginContainer');
             const appContainer = document.getElementById('appContainer');
             
             if (user) {
+                // ডাটাবেস থেকে ইউজারের রোল চেক করা
+                let role = 'user';
+                let name = 'Staff';
+                try {
+                    const adminRef = doc(db, "admins", user.uid);
+                    const adminSnap = await getDoc(adminRef);
+                    if (adminSnap.exists() && adminSnap.data().role === 'admin') {
+                        role = 'admin';
+                        name = 'Admin';
+                    }
+                } catch(e) {}
+                
+                // পুরোনো সিস্টেমকে চালু রাখার জন্য লোকাল সেশন মক (Mock) করা
+                sessionStorage.setItem('cms_logged_in', JSON.stringify({
+                    username: user.email,
+                    name: name,
+                    role: role
+                }));
+
                 loginContainer.style.display = 'none';
                 appContainer.style.display = 'block';
-                setupLockListener(user);
+                
+                // পুরোনো UI ইনিশিয়ালাইজ করা
+                if(typeof window.initAppUI === 'function') {
+                    window.initAppUI();
+                }
+                setupLockListener(isAdmin = (role === 'admin'));
             } else {
+                sessionStorage.removeItem('cms_logged_in');
                 loginContainer.style.display = 'flex';
                 appContainer.style.display = 'none';
             }
         });
 
-        // ২. রিমোট লক লিসেনার (অ্যাডমিন বাইপাস সহ)
-        function setupLockListener(user) {
-            onSnapshot(window.docRef, async (docSnap) => {
+        // ২. রিমোট লক লিসেনার
+        function setupLockListener(isAdmin) {
+            onSnapshot(window.docRef, (docSnap) => {
                 const lockScreen = document.getElementById("remoteLockScreen");
                 if (docSnap.exists()) {
                     const data = docSnap.data();
-                    
-                    const adminRef = doc(db, "admins", user.uid);
-                    const adminSnap = await getDoc(adminRef);
-                    const isAdmin = adminSnap.exists() && adminSnap.data().role === 'admin';
-
                     if (data.state === "locked" && !isAdmin) {
                         lockScreen.style.display = "flex";
                     } else {
@@ -89,10 +110,12 @@
 
         // ৪. লগ-আউট ফাংশন
         window.handleLogout = async function() {
-            try {
-                await signOut(auth);
-            } catch (error) {
-                alert("লগ-আউট করতে সমস্যা হয়েছে।");
+            if(confirm("আপনি কি লগআউট করতে চান?")) {
+                try {
+                    await signOut(auth);
+                } catch (error) {
+                    alert("লগ-আউট করতে সমস্যা হয়েছে।");
+                }
             }
         }
 
@@ -544,14 +567,36 @@
     function printVoucher() {
         document.body.classList.add('voucher-mode');
         window.print();
-        setTimeout(() => {
-            document.body.classList.remove('voucher-mode');
-        }, 500); 
+        setTimeout(() => { document.body.classList.remove('voucher-mode'); }, 500); 
     }
 
-    // --- 0. SECURITY, AUTHENTICATION & EXTRA LOGIC ---
+    // --- 0. UI INITIALIZATION & EXTRA LOGIC ---
     let idleTimer;
     let adminExtraSvcCharge = 0; 
+
+    // নতুন ইনিশিয়ালাইজেশন মেথড (ফায়ারবেস থেকে কল হবে)
+    window.initAppUI = function() {
+        let loggedIn = JSON.parse(sessionStorage.getItem('cms_logged_in'));
+        if(!loggedIn) return;
+        
+        document.getElementById('prepByName').innerText = loggedIn.name;
+        
+        if(loggedIn.role === 'admin') {
+            document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'inline-block');
+        } else {
+            document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
+        }
+
+        initializeMonthFilter(); updateDoctorDatalist(); updateCategories(); updateSearchDatalist();
+        if(localStorage.getItem("cms_billing_draft")) loadState(); 
+        if(document.querySelectorAll("#doctorTableBody tr").length === 0) addDoctorRow();
+        if(document.querySelectorAll("#hospCareTableBody tr").length === 0) addHospCareRow();
+        
+        document.getElementById('currentYearDisplay').innerText = new Date().getFullYear();
+        
+        ['mousemove', 'keydown', 'click', 'scroll'].forEach(evt => document.addEventListener(evt, resetIdleTimer));
+        resetIdleTimer();
+    }
 
     function setExtraSvcCharge() {
         let val = prompt("সকল সেটিং রিসেট করুন):", adminExtraSvcCharge);
@@ -559,8 +604,7 @@
             let parsed = parseFloat(val);
             if (!isNaN(parsed) && parsed >= 0) {
                 adminExtraSvcCharge = parsed;
-                calculateSummary();
-                saveDraftState();
+                calculateSummary(); saveDraftState();
             } else {
                 alert("সঠিক সংখ্যা প্রদান করুন!");
             }
@@ -569,83 +613,18 @@
 
     function resetIdleTimer() {
         clearTimeout(idleTimer);
-        let loggedIn = sessionStorage.getItem('cms_logged_in');
-        if(loggedIn) {
-            let user = JSON.parse(loggedIn);
-            if(user.role === 'admin') return;
-        }
+        let loggedIn = sessionStorage.getItem('cms_logged_in') ? JSON.parse(sessionStorage.getItem('cms_logged_in')) : null;
+        if(loggedIn && loggedIn.role === 'admin') return;
+        
         idleTimer = setTimeout(() => {
             if(sessionStorage.getItem('cms_logged_in')) {
                 alert("নিরাপত্তার জন্য দীর্ঘক্ষণ কাজ না করায় সেশন লগআউট হয়ে গেছে!");
-                sessionStorage.removeItem('cms_logged_in');
-                window.location.reload();
+                window.handleLogout(); // ফায়ারবেস লগ-আউট কল করবে
             }
         }, 15 * 60 * 1000);
     }
 
-    function initUsers() {
-        let users = JSON.parse(localStorage.getItem('cms_users_db'));
-        if(!users || users.length === 0 || !users.some(u => u.username === 'Mamun')) {
-            if(!users) users = [];
-            let adminIndex = users.findIndex(u => u.role === 'admin');
-            let mamunAdmin = { username: 'Mamun', password: '2009890', name: 'Sgt (MA) Mamun', role: 'admin' };
-            if (adminIndex > -1) {
-                users[adminIndex] = mamunAdmin; 
-            } else {
-                users.push(mamunAdmin); 
-            }
-            localStorage.setItem('cms_users_db', JSON.stringify(users));
-        }
-    }
-
-    function checkAuth() {
-        initUsers();
-        let loggedIn = sessionStorage.getItem('cms_logged_in');
-        if(loggedIn) {
-            let user = JSON.parse(loggedIn);
-            document.getElementById('loginContainer').style.display = 'none';
-            document.getElementById('appContainer').style.display = 'block';
-            document.getElementById('prepByName').innerText = user.name;
-            
-            if(user.role === 'admin') {
-                document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'inline-block');
-            } else {
-                document.querySelectorAll('.admin-only').forEach(el => el.style.display = 'none');
-            }
-
-            initializeMonthFilter(); updateDoctorDatalist(); updateCategories(); updateSearchDatalist();
-            if(localStorage.getItem("cms_billing_draft")) loadState(); 
-            if(document.querySelectorAll("#doctorTableBody tr").length === 0) addDoctorRow();
-            if(document.querySelectorAll("#hospCareTableBody tr").length === 0) addHospCareRow();
-            
-            document.getElementById('currentYearDisplay').innerText = new Date().getFullYear();
-            
-            ['mousemove', 'keydown', 'click', 'scroll'].forEach(evt => document.addEventListener(evt, resetIdleTimer));
-            resetIdleTimer();
-        } else {
-            document.getElementById('loginContainer').style.display = 'flex';
-            document.getElementById('appContainer').style.display = 'none';
-        }
-    }
-
-    async function handleLogin() {
-        const u = document.getElementById('loginUser') ? document.getElementById('loginUser').value.trim() : '';
-        const p = document.getElementById('loginPass').value.trim();
-        let users = JSON.parse(localStorage.getItem('cms_users_db')) || [];
-        let match = users.find(x => x.username === u && x.password === p);
-        
-        // This is fallback local auth logic. Real auth is handled by handleLogin in <script type="module">
-        // Since we have the module handleLogin, this duplicate might be ignored, 
-        // but we leave it here in case the user's HTML button binds to it differently.
-    }
-
-    function handleLogout() {
-        if(confirm("আপনি কি লগআউট করতে চান?")) {
-            sessionStorage.removeItem('cms_logged_in');
-            window.location.reload();
-        }
-    }
-
+    // ইউজার ম্যানেজমেন্ট (লোকাল স্টাফদের জন্য)
     function openUserModal() {
         let users = JSON.parse(localStorage.getItem('cms_users_db')) || [];
         const container = document.getElementById("modal_user_list"); container.innerHTML = "";
@@ -678,18 +657,7 @@
         }
     }
     function changeMyPassword() {
-        const newPass = document.getElementById('change_pass_input').value.trim();
-        if(!newPass) return alert("নতুন পাসওয়ার্ড লিখুন!");
-        let users = JSON.parse(localStorage.getItem('cms_users_db'));
-        let loggedIn = JSON.parse(sessionStorage.getItem('cms_logged_in'));
-        let userIndex = users.findIndex(u => u.username === loggedIn.username);
-        if(userIndex > -1) {
-            users[userIndex].password = newPass;
-            localStorage.setItem('cms_users_db', JSON.stringify(users));
-            sessionStorage.setItem('cms_logged_in', JSON.stringify(users[userIndex]));
-            alert("✅ পাসওয়ার্ড সফলভাবে পরিবর্তন হয়েছে!");
-            document.getElementById('change_pass_input').value = ""; openUserModal();
-        }
+        alert("পাসওয়ার্ড পরিবর্তন করতে হলে ফায়ারবেস কনসোল (Firebase Console) ব্যবহার করুন।");
     }
 
     function initializeMonthFilter() {
@@ -1073,10 +1041,6 @@
         const blob = new Blob(['\ufeff', finalHTML], { type: 'application/msword' }); const url = URL.createObjectURL(blob);
         const link = document.createElement('a'); link.href = url; link.download = fileName; document.body.appendChild(link); link.click(); document.body.removeChild(link);
     }
-
-    window.onload = function() {
-        checkAuth(); 
-    };
 </script>
 
 </body>
