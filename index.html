@@ -1,4 +1,11 @@
-<!-- Firebase SDKs (v10 Modular) with Offline Persistence & Name Fix -->
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hospital Billing & Management (Cloud Secured)</title>
+    
+    <!-- Firebase SDKs (v10 Modular) with Offline Persistence & Bug Fixes -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, doc, getDoc, setDoc, onSnapshot, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -22,17 +29,23 @@
         
         window.db = db;
         window.auth = auth;
+        window.firestoreGetDoc = getDoc; // এক্সেল এক্সপোর্টের জন্য গ্লোবাল করা হলো
+        window.firestoreDoc = doc;
         window.docRef = doc(db, "app_settings", "status");
 
-        // ১. রিয়েল-টাইম সেশন ট্র্যাকার (স্মার্ট নেম এক্সট্রাক্টর সহ)
+        let isIntentionallyLoggedOut = false; // লগ-আউট বাগ ফিক্সের জন্য ফ্ল্যাগ
+        let unsubLock = null;
+
+        // ১. রিয়েল-টাইম সেশন ট্র্যাকার (স্মার্ট নেম এক্সট্রাক্টর)
         onAuthStateChanged(auth, async (user) => {
             const loginContainer = document.getElementById('loginContainer');
             const appContainer = document.getElementById('appContainer');
             
             if (user) {
+                isIntentionallyLoggedOut = false;
                 let role = 'user';
                 
-                // ইমেইল থেকে অটোমেটিক নাম বের করা (যেমন: habib@gmail.com -> Habib)
+                // ইমেইল থেকে অটোমেটিক নাম বের করা
                 let rawName = user.email.split('@')[0];
                 let name = rawName.charAt(0).toUpperCase() + rawName.slice(1);
 
@@ -41,41 +54,37 @@
                     const adminSnap = await getDoc(adminRef);
                     if (adminSnap.exists() && adminSnap.data().role === 'admin') {
                         role = 'admin';
-                        // আপনি চাইলে নিচের নামটি আপনার পছন্দমতো পরিবর্তন করতে পারেন
-                        name = 'Sgt (MA) Mamun'; 
+                        name = 'Sgt (MA) Mamun'; // অ্যাডমিনের কাস্টম নাম
                     }
                 } catch(e) {}
                 
-                sessionStorage.setItem('cms_logged_in', JSON.stringify({
-                    username: user.email,
-                    name: name,
-                    role: role
-                }));
-
+                sessionStorage.setItem('cms_logged_in', JSON.stringify({ username: user.email, name: name, role: role }));
                 loginContainer.style.display = 'none';
                 appContainer.style.display = 'block';
                 
                 if(typeof window.initAppUI === 'function') window.initAppUI();
-                
                 setupLockListener(role === 'admin');
             } else {
                 sessionStorage.removeItem('cms_logged_in');
                 loginContainer.style.display = 'flex';
                 appContainer.style.display = 'none';
+                document.getElementById("remoteLockScreen").style.display = "none";
             }
         });
 
-        // ২. রিমোট লক লিসেনার
+        // ২. রিমোট লক লিসেনার (লগ-আউট বাগ ফিক্সড)
         function setupLockListener(isAdmin) {
-            onSnapshot(window.docRef, (docSnap) => {
+            if(unsubLock) unsubLock();
+            unsubLock = onSnapshot(window.docRef, (docSnap) => {
+                if(isIntentionallyLoggedOut) return;
                 const lockScreen = document.getElementById("remoteLockScreen");
-                if (docSnap.exists()) {
-                    const data = docSnap.data();
-                    if (data.state === "locked" && !isAdmin) lockScreen.style.display = "flex";
-                    else lockScreen.style.display = "none";
+                if (docSnap.exists() && docSnap.data().state === "locked" && !isAdmin) {
+                    lockScreen.style.display = "flex";
+                } else {
+                    lockScreen.style.display = "none";
                 }
             }, (error) => {
-                document.getElementById("remoteLockScreen").style.display = "flex";
+                if(!isIntentionallyLoggedOut) document.getElementById("remoteLockScreen").style.display = "flex";
             });
         }
 
@@ -96,9 +105,10 @@
             }
         }
 
-        // ৪. লগ-আউট
+        // ৪. লগ-আউট (ক্লিন এক্সিট)
         window.handleLogout = async function() {
             if(confirm("আপনি কি লগআউট করতে চান?")) {
+                isIntentionallyLoggedOut = true;
                 try { await signOut(auth); } catch (error) { alert("লগ-আউট করতে সমস্যা হয়েছে।"); }
             }
         }
@@ -110,7 +120,6 @@
                 const snap = await getDoc(window.docRef);
                 let currentState = snap.exists() ? (snap.data().state || "active") : "active";
                 let newState = (currentState === "active") ? "locked" : "active";
-                
                 await setDoc(window.docRef, { state: newState }, { merge: true });
                 alert(newState === "locked" ? "🔒 সিস্টেম লক করা হয়েছে!" : "🔓 সিস্টেম আনলক করা হয়েছে!");
             } catch(e) {
@@ -178,7 +187,6 @@
         .btn-sm { color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer; font-weight: bold; font-size: 12px; }
         .btn-manage-doc { background-color: #8b5cf6; } .btn-manage-pat { background-color: #0ea5e9; } 
         .btn-monthly { background-color: #f59e0b; } .btn-clear { background-color: #ef4444; }
-        .btn-backup { background-color: #10b981; } .btn-restore { background-color: #3b82f6; }
         .btn-logout { background-color: #e11d48; }
         .btn-remote-lock { background-color: #dc2626; }
         .btn-svc-charge { background-color: #14b8a6; }
@@ -300,8 +308,6 @@
         </div>
     </div>
 
-    <input type="file" id="restoreFile" style="display:none;" accept=".json" onchange="handleRestore(event)">
-
     <!-- CONTROLS -->
     <div class="dashboard-card" style="margin-bottom: 10px; padding: 10px 25px;">
         <div class="top-controls">
@@ -312,13 +318,11 @@
                 <datalist id="patientSearchList"></datalist>
             </div>
             <div class="nav-buttons">
-                <!-- User management button is permanently removed -->
+                <!-- Backup & Restore Buttons Removed -->
                 <button class="btn-sm btn-manage-pat admin-only" onclick="openPatientModal()">👥 Manage Patients</button>
                 <button class="btn-sm btn-manage-doc admin-only" onclick="openDocModal()">👨‍⚕️ Doctors</button>
                 <button class="btn-sm btn-monthly admin-only" onclick="downloadMonthlyCSV()">📅 Export Excel</button>
-                <button class="btn-sm btn-backup admin-only" onclick="exportBackup()">💾 Backup</button>
                 <button class="btn-sm btn-svc-charge admin-only" onclick="setExtraSvcCharge()" title="সকল কিছু রিসেট করুন"> Reset</button>			
-                <button class="btn-sm btn-restore admin-only" onclick="document.getElementById('restoreFile').click()">📂 Restore</button>
                 <button class="btn-sm btn-remote-lock admin-only" onclick="toggleRemoteLock()">🔒 Lock/Unlock App</button>
                 <button class="btn-sm btn-clear" onclick="clearFormAndStorage()">➕ New Bill / Clear</button>
                 <button class="btn-sm btn-logout" onclick="handleLogout()">🚪 Logout</button>
@@ -550,7 +554,7 @@
     let idleTimer;
     let adminExtraSvcCharge = 0; 
 
-    // নতুন ইনিশিয়ালাইজেশন মেথড (ফায়ারবেস থেকে কল হবে)
+    // নতুন ইনিশিয়ালাইজেশন মেথড
     window.initAppUI = function() {
         let loggedIn = JSON.parse(sessionStorage.getItem('cms_logged_in'));
         if(!loggedIn) return;
@@ -737,61 +741,23 @@
         setFormReadOnly(true); 
     }
 
-    function exportBackup() {
-        let backup = {
-            monthly: localStorage.getItem('cms_monthly_detailed'), doctors: localStorage.getItem('cms_doctors_db'),
-            draft: localStorage.getItem('cms_billing_draft')
-        };
-        let blob = new Blob([JSON.stringify(backup)], {type: "application/json"}); const link = document.createElement("a"); link.href = URL.createObjectURL(blob);
-        const dateStr = new Date().toISOString().split('T')[0]; link.download = `Hospital_Backup_${dateStr}.json`; document.body.appendChild(link); link.click(); document.body.removeChild(link);
-    }
-    function handleRestore(event) {
-        let file = event.target.files[0]; if(!file) return; let reader = new FileReader();
-        reader.onload = function(e) {
-            try {
-                let data = JSON.parse(e.target.result);
-                if(data.monthly) localStorage.setItem('cms_monthly_detailed', data.monthly);
-                if(data.doctors) localStorage.setItem('cms_doctors_db', data.doctors);
-                if(data.draft) localStorage.setItem('cms_billing_draft', data.draft);
-                alert("✅ ডাটা সফলভাবে রিস্টোর হয়েছে!"); location.reload();
-            } catch(err) { alert("❌ ভুল ব্যাকআপ ফাইল! এটি রিস্টোর করা সম্ভব নয়।"); }
-        }; reader.readAsText(file);
-    }
+    // ক্লাউড ইন্টিগ্রেটেড এক্সেল এক্সপোর্ট ইঞ্জিন
+    window.downloadMonthlyCSV = async function() {
+        const currentMonth = getCurrentFilterMonth();
+        let allData = [];
+        try {
+            const backupRef = window.firestoreDoc(window.db, "patients", "billing_backup");
+            const backupSnap = await window.firestoreGetDoc(backupRef);
+            if(backupSnap.exists() && backupSnap.data().payload) {
+                allData = JSON.parse(backupSnap.data().payload);
+            } else {
+                allData = JSON.parse(localStorage.getItem('cms_monthly_detailed')) || [];
+            }
+        } catch(e) {
+            allData = JSON.parse(localStorage.getItem('cms_monthly_detailed')) || [];
+        }
 
-    // এই ফাংশনটি মডিউল স্ক্রিপ্ট দ্বারা হাইজ্যাক হয়ে ক্লাউডে সিঙ্ক হবে
-    window.saveToMonthlyRecord = function() {
-        const opCharge = parseFloat(document.getElementById("opChargeInput").value) || 0;
-        if(opCharge > 50000) { if(!confirm("⚠️ Operation Charge 50,000 টাকার বেশি দেওয়া হয়েছে। অ্যামাউন্ট কি ঠিক আছে?")) return; }
-
-        const adNo = document.getElementById("adNumber").value.trim(); const pName = document.getElementById("patientName").value.trim();
-        if(!adNo || !pName) { alert("❌ অনুগ্রহ করে A&D NO এবং রোগীর নাম পূরণ করুন!"); return; }
-        
-        let loggedIn = JSON.parse(sessionStorage.getItem('cms_logged_in'));
-        let rawInputs = {}; formInputsToSave.forEach(id => { if(document.getElementById(id)) rawInputs[id] = document.getElementById(id).value; });
-        let rawDoctors = []; document.querySelectorAll("#doctorTableBody tr").forEach(tr => { rawDoctors.push({ name: tr.querySelector(".doc-input").value, fee: tr.querySelector(".doc-fee").value, days: tr.querySelector(".doc-days").value }); });
-        let rawHospCare = []; document.querySelectorAll("#hospCareTableBody tr").forEach(tr => { rawHospCare.push({ ward: tr.querySelector(".hc-ward-select").value, days: tr.querySelector(".hc-days").value }); });
-
-        const record = {
-            billingMonth: getCurrentFilterMonth(), date: new Date().toLocaleDateString('en-GB'), adNo: adNo, pName: pName, mainWard: document.getElementById("mainWardSelect").value, doctors: {}, preparedBy: loggedIn ? loggedIn.name : "Admin",
-            mo_lab: document.getElementById("mo_lab").innerText, mo_xray: document.getElementById("mo_xray").innerText, mo_ecg: document.getElementById("mo_ecg").innerText, mo_echo: document.getElementById("mo_echo").innerText, mo_endo: document.getElementById("mo_endo").innerText, mo_phy: document.getElementById("mo_phy").innerText, mo_dental: document.getElementById("mo_dental").innerText,
-            st_lab: document.getElementById("st_lab").innerText, st_xray: document.getElementById("st_xray").innerText, st_ecg_echo: document.getElementById("st_ecg_echo_endo").innerText, st_phy: document.getElementById("st_phy").innerText, st_dental: document.getElementById("st_dental").innerText, st_ot: document.getElementById("st_ot").innerText, st_hdu: document.getElementById("st_hdu").innerText, st_icu: document.getElementById("st_icu").innerText, st_ward_amount: document.getElementById("st_ward").innerText, 
-            hospStoppage: document.getElementById("sumHospStoppage").innerText, svcCharge: document.getElementById("sumSvcCharge").innerText, govtShare: document.getElementById("sumGovtShare").innerText, rndShare: document.getElementById("sumRndShare").innerText, grandTotal: document.getElementById("sumGrandTotal").innerText,
-            rawState: { inputs: rawInputs, doctors: rawDoctors, hospCare: rawHospCare, adminExtraSvcCharge: adminExtraSvcCharge }
-        };
-        
-        document.querySelectorAll("#doctorTableBody tr").forEach(row => { const docName = row.querySelector(".doc-input").value.trim().toUpperCase(); const share = parseFloat(row.querySelector(".spl-share-tag").innerText) || 0; if(docName && share > 0) record.doctors[docName] = (record.doctors[docName] || 0) + share; });
-        const surgName = document.getElementById("surgeonName").value.trim().toUpperCase(); const surgShare = parseFloat(document.getElementById("surgeonShare").innerText) || 0;
-        if(surgName && surgShare > 0) record.doctors[surgName] = (record.doctors[surgName] || 0) + surgShare;
-        const anaesName = document.getElementById("anaesName").value.trim().toUpperCase(); const anaesShare = parseFloat(document.getElementById("anaesShare").innerText) || 0;
-        if(anaesName && anaesShare > 0) record.doctors[anaesName] = (record.doctors[anaesName] || 0) + anaesShare;
-
-        let monthlyData = JSON.parse(localStorage.getItem('cms_monthly_detailed')) || []; let existingIndex = monthlyData.findIndex(r => String(r.adNo) === String(adNo));
-        if(existingIndex >= 0) { monthlyData[existingIndex] = record; alert("✅ বিলটি সফলভাবে আপডেট হয়েছে!"); } else { monthlyData.push(record); alert(`✅ বিলটি সফলভাবে ${getCurrentFilterMonth()} মাসের খাতায় সেভ হয়েছে!`); }
-        localStorage.setItem('cms_monthly_detailed', JSON.stringify(monthlyData)); updateSearchDatalist();
-    }
-
-    function downloadMonthlyCSV() {
-        let allData = JSON.parse(localStorage.getItem('cms_monthly_detailed')) || []; const currentMonth = getCurrentFilterMonth(); let data = allData.filter(r => r.billingMonth === currentMonth);
+        let data = allData.filter(r => r.billingMonth === currentMonth);
         if(data.length === 0) { alert(`⚠️ ${currentMonth} মাসের জন্য কোনো ডেটা সেভ করা নেই!`); return; }
         
         let csvContent = "data:text/csv;charset=utf-8,\uFEFF"; let headerRow = ["NAME"];
@@ -836,7 +802,7 @@
                     let days = Math.ceil((d2 - d1) / (1000 * 60 * 60 * 24)) + 1;
                     document.getElementById("totalDays").value = days; 
                 } else { 
-                    alert("⚠️ রিলিজের তারিখ ভর্তির তারিখের আগে হতে পারে കട না!"); document.getElementById("dischargeDate").value = ""; document.getElementById("totalDays").value = 0; 
+                    alert("⚠️ রিলিজের তারিখ ভর্তির তারিখের আগে হতে পারে না!"); document.getElementById("dischargeDate").value = ""; document.getElementById("totalDays").value = 0; 
                 } 
             } 
         } else { document.getElementById("totalDays").value = 0; }
@@ -923,11 +889,23 @@
     function removeHospCareRow(btn) { btn.closest("tr").remove(); calculateHospCareTotals(); }
     function onHospCareWardChange(selectElem) { selectElem.closest("tr").querySelector(".hc-rate").value = (wardRates[document.getElementById("categorySelect").value] || wardRates["CNE"])[selectElem.value] || 0; calculateHospCareTotals(); }
     function recalculateAllHospCareRows() { document.querySelectorAll("#hospCareTableBody tr").forEach(row => { const s = row.querySelector(".hc-ward-select"); if(s) onHospCareWardChange(s); }); }
+    
+    // বাগ ফিক্স: Hospital Care সেকশন থেকে ১৪ নাম্বার সেকশন ট্রিগার করা হলো
     function calculateHospCareTotals() {
-        let grandTotal = 0; document.querySelectorAll("#hospCareTableBody tr").forEach(row => { const total = (parseFloat(row.querySelector(".hc-rate").value) || 0) * (parseInt(row.querySelector(".hc-days").value) || 0); row.querySelector(".hc-row-total").innerText = total.toFixed(2); grandTotal += total; });
+        let grandTotal = 0; 
+        document.querySelectorAll("#hospCareTableBody tr").forEach(row => { 
+            const total = (parseFloat(row.querySelector(".hc-rate").value) || 0) * (parseInt(row.querySelector(".hc-days").value) || 0); 
+            row.querySelector(".hc-row-total").innerText = total.toFixed(2); 
+            grandTotal += total; 
+        });
         document.getElementById("hospCareGrandTotal").innerText = grandTotal.toFixed(2);
-        document.getElementById("hcGovt").innerText = (grandTotal * 0.35).toFixed(2); document.getElementById("hcRnd").innerText = (grandTotal * 0.30).toFixed(2); document.getElementById("hcStaff").innerText = (grandTotal * 0.10).toFixed(2); document.getElementById("hcSvc").innerText = (grandTotal * 0.25).toFixed(2);
-        calculateSummary();
+        document.getElementById("hcGovt").innerText = (grandTotal * 0.35).toFixed(2); 
+        document.getElementById("hcRnd").innerText = (grandTotal * 0.30).toFixed(2); 
+        document.getElementById("hcStaff").innerText = (grandTotal * 0.10).toFixed(2); 
+        document.getElementById("hcSvc").innerText = (grandTotal * 0.25).toFixed(2);
+        
+        // ট্রিগার: স্টাফ শেয়ার ডিস্ট্রিবিউশন লাইভ আপডেট
+        calculateOTDistribution(); 
     }
 
     function calculateSummary() {
