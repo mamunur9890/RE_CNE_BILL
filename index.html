@@ -7,161 +7,109 @@
     
     <!-- Firebase SDKs (v10 Modular) - Single Script Block -->
     <script type="module">
-    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
-    // নতুন Auth মডিউল
-    import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
-    const firebaseConfig = {
-        apiKey: "AIzaSyCqp5idVBbUpKIpbqgTNzi8wd_uYu2g1IQ",
-  authDomain: "hospital-cloud-billing.firebaseapp.com",
-  projectId: "hospital-cloud-billing",
-  storageBucket: "hospital-cloud-billing.firebasestorage.app",
-  messagingSenderId: "521680708519",
-  appId: "1:521680708519:web:e14ea0afad51138bae4c82",
-  measurementId: "G-X8M25CGFWG"
-};
+        const firebaseConfig = {
+            apiKey: "AIzaSyCqp5idVBbUpKIpbqgTNzi8wd_uYu2g1IQ",
+            authDomain: "hospital-cloud-billing.firebaseapp.com",
+            projectId: "hospital-cloud-billing",
+            storageBucket: "hospital-cloud-billing.firebasestorage.app",
+            messagingSenderId: "521680708519",
+            appId: "1:521680708519:web:e14ea0afad51138bae4c82",
+            measurementId: "G-X8M25CGFWG"
+        };
 
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
-    const auth = getAuth(app);
-    
-    window.db = db;
-    window.auth = auth;
-    window.docRef = doc(db, "app_settings", "status");
-
-    // ১. রিয়েল-টাইম সেশন ট্র্যাকার
-    onAuthStateChanged(auth, (user) => {
-        const loginContainer = document.getElementById('loginContainer');
-        const appContainer = document.getElementById('appContainer');
-        
-        if (user) {
-            // ইউজার লগ-ইন থাকলে মূল অ্যাপ দেখান
-            loginContainer.style.display = 'none';
-            appContainer.style.display = 'block';
-            
-            // রিমোট লক চেক চালু করুন
-            setupLockListener(user);
-        } else {
-            // ইউজার লগ-আউট থাকলে লগ-ইন স্ক্রিন দেখান
-            loginContainer.style.display = 'flex';
-            appContainer.style.display = 'none';
-        }
-    });
-
-    // ২. রিমোট লক লিসেনার (অ্যাডমিন বাইপাস সহ)
-    function setupLockListener(user) {
-        onSnapshot(window.docRef, async (docSnap) => {
-            const lockScreen = document.getElementById("remoteLockScreen");
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                
-                // ইউজার কি অ্যাডমিন? (ডাটাবেস থেকে চেক)
-                const adminRef = doc(db, "admins", user.uid);
-                const adminSnap = await getDoc(adminRef);
-                const isAdmin = adminSnap.exists() && adminSnap.data().role === 'admin';
-
-                if (data.state === "locked" && !isAdmin) {
-                    lockScreen.style.display = "flex";
-                } else {
-                    lockScreen.style.display = "none";
-                }
-            }
-        }, (error) => {
-            // রুলস যদি এক্সেস ডিনাই করে, তবে বুঝতে হবে সিস্টেম লকড
-            document.getElementById("remoteLockScreen").style.display = "flex";
-        });
-    }
-
-    // ৩. সিকিউর লগ-ইন ফাংশন
-    window.handleLogin = async function() {
-        const email = document.getElementById('loginEmail').value; 
-        const pass = document.getElementById('loginPass').value;
-        const errorMsg = document.getElementById('loginError');
-
-    // ৪. লগ-আউট ফাংশন
-    window.handleLogout = async function() {
-        try {
-            await signOut(auth);
-        } catch (error) {
-            alert("লগ-আউট করতে সমস্যা হয়েছে।");
-        }
-    }
-
-    // ৫. রিমোট লক টগল (শুধু অ্যাডমিনের জন্য)
-    window.toggleRemoteLock = async function() {
-        if(!window.docRef) return;
-        try {
-            const snap = await getDoc(window.docRef);
-            let currentState = "active";
-            if(snap.exists()) currentState = snap.data().state || "active";
-            
-            let newState = (currentState === "active") ? "locked" : "active";
-            await setDoc(window.docRef, { state: newState }, { merge: true });
-            
-            alert(newState === "locked" ? "🔒 সিস্টেম লক করা হয়েছে!" : "🔓 সিস্টেম আনলক করা হয়েছে!");
-        } catch(e) {
-            alert("অ্যাক্সেস ডিনাইড! ফায়ারওয়াল আপনাকে আটকে দিয়েছে।");
-        }
-    }
-</script>
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
+        const auth = getAuth(app);
+        
         window.db = db;
+        window.auth = auth;
         window.docRef = doc(db, "app_settings", "status");
 
-        // Realtime listener with Admin Bypass Check & Local Cache
-        onSnapshot(window.docRef, (docSnap) => {
-            const lockScreen = document.getElementById("remoteLockScreen");
-            let loggedInUser = JSON.parse(sessionStorage.getItem('cms_logged_in'));
-
-            if (docSnap.exists()) {
-                const data = docSnap.data();
-                // অনলাইনে থাকা অবস্থায় স্ট্যাটাস লোকাল স্টোরেজে ক্যাশ করে রাখা হচ্ছে[cite: 1]
-                localStorage.setItem('cms_cached_lock_state', data.state);
-                
-                if (data.state === "locked" && loggedInUser && loggedInUser.role !== 'admin') {
-                    lockScreen.style.display = "flex";
-                } else {
-                    lockScreen.style.display = "none";
-                }
+        // ১. রিয়েল-টাইম সেশন ট্র্যাকার
+        onAuthStateChanged(auth, (user) => {
+            const loginContainer = document.getElementById('loginContainer');
+            const appContainer = document.getElementById('appContainer');
+            
+            if (user) {
+                loginContainer.style.display = 'none';
+                appContainer.style.display = 'block';
+                setupLockListener(user);
             } else {
-                checkOfflineLock(loggedInUser, lockScreen);
+                loginContainer.style.display = 'flex';
+                appContainer.style.display = 'none';
             }
-        }, (error) => {
-            // ইন্টারনেট না থাকলে বা অফলাইন মোড হলে এই ব্লকে কাজ করবে[cite: 1]
-            let loggedInUser = JSON.parse(sessionStorage.getItem('cms_logged_in'));
-            const lockScreen = document.getElementById("remoteLockScreen");
-            checkOfflineLock(loggedInUser, lockScreen);
         });
 
-        // অফলাইনে বা ইন্টারনেট না থাকলে ক্যাশ করা স্টেট চেক করার ফাংশন[cite: 1]
-        function checkOfflineLock(loggedInUser, lockScreen) {
-            let cachedState = localStorage.getItem('cms_cached_lock_state');
-            // যদি ইন্টারনেট না থাকে এবং পূর্বের ক্যাশ করা স্টেট 'locked' থাকে[cite: 1]
-            if (cachedState === "locked" && loggedInUser && loggedInUser.role !== 'admin') {
-                lockScreen.style.display = "flex";
+        // ২. রিমোট লক লিসেনার (অ্যাডমিন বাইপাস সহ)
+        function setupLockListener(user) {
+            onSnapshot(window.docRef, async (docSnap) => {
+                const lockScreen = document.getElementById("remoteLockScreen");
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    
+                    const adminRef = doc(db, "admins", user.uid);
+                    const adminSnap = await getDoc(adminRef);
+                    const isAdmin = adminSnap.exists() && adminSnap.data().role === 'admin';
+
+                    if (data.state === "locked" && !isAdmin) {
+                        lockScreen.style.display = "flex";
+                    } else {
+                        lockScreen.style.display = "none";
+                    }
+                }
+            }, (error) => {
+                document.getElementById("remoteLockScreen").style.display = "flex";
+            });
+        }
+
+        // ৩. সিকিউর লগ-ইন ফাংশন
+        window.handleLogin = async function() {
+            const email = document.getElementById('loginEmail').value; 
+            const pass = document.getElementById('loginPass').value;
+            const errorMsg = document.getElementById('loginError');
+
+            if(!email || !pass) {
+                errorMsg.innerText = "ইমেইল এবং পাসওয়ার্ড দিন!";
+                errorMsg.style.display = 'block';
+                return;
+            }
+
+            try {
+                await signInWithEmailAndPassword(auth, email, pass);
+                errorMsg.style.display = 'none';
+            } catch (error) {
+                errorMsg.innerText = "ভুল ইমেইল বা পাসওয়ার্ড!";
+                errorMsg.style.display = 'block';
             }
         }
 
-        // Remote Lock Function fixed in Global Scope[cite: 1]
+        // ৪. লগ-আউট ফাংশন
+        window.handleLogout = async function() {
+            try {
+                await signOut(auth);
+            } catch (error) {
+                alert("লগ-আউট করতে সমস্যা হয়েছে।");
+            }
+        }
+
+        // ৫. রিমোট লক টগল (শুধু অ্যাডমিনের জন্য)
         window.toggleRemoteLock = async function() {
             if(!window.docRef) return;
             try {
                 const snap = await getDoc(window.docRef);
                 let currentState = "active";
-                if(snap.exists()) {
-                    currentState = snap.data().state || "active";
-                }
+                if(snap.exists()) currentState = snap.data().state || "active";
+                
                 let newState = (currentState === "active") ? "locked" : "active";
                 await setDoc(window.docRef, { state: newState }, { merge: true });
                 
-                // লোকাল স্টোরেজেও সাথে সাথে আপডেট করে দেওয়া[cite: 1]
-                localStorage.setItem('cms_cached_lock_state', newState);
-
-                alert(newState === "locked" ? "🔒 ইউজারদের অ্যাপ রিমোটলি লক করা হয়েছে! (আপনি অ্যাডমিন হিসেবে সচল আছেন)" : "🔓 ইউজারদের অ্যাপ রিমোটলি আনলক করা হয়েছে!");
+                alert(newState === "locked" ? "🔒 সিস্টেম লক করা হয়েছে!" : "🔓 সিস্টেম আনলক করা হয়েছে!");
             } catch(e) {
-                alert("রিমোট লক পরিবর্তন করতে সমস্যা হয়েছে: " + e.message);
+                alert("অ্যাক্সেস ডিনাইড! ফায়ারওয়াল আপনাকে আটকে দিয়েছে।");
             }
         }
     </script>
@@ -180,12 +128,10 @@
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Arial, sans-serif; }
         body { background-color: var(--bg-color); color: var(--text-main); font-size: 13px; padding: 10px; }
         
-        /* REMOTE LOCK OVERLAY SCREEN */
         #remoteLockScreen { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 23, 42, 0.95); z-index: 99999; justify-content: center; align-items: center; color: #fff; text-align: center; flex-direction: column; padding: 20px; }
         #remoteLockScreen h1 { font-size: 28px; margin-bottom: 10px; color: #f87171; }
         #remoteLockScreen p { font-size: 16px; color: #cbd5e1; }
 
-        /* LOGIN SCREEN STYLES */
         #loginContainer { display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #e2e8f0; position: fixed; top:0; left:0; width:100%; z-index: 9999; }
         .login-box { background: #fff; padding: 40px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 350px; text-align: center; }
         .login-box h2 { color: var(--primary-color); margin-bottom: 20px; font-size: 20px; }
@@ -193,10 +139,8 @@
         .login-box button { width: 100%; padding: 10px; background-color: var(--accent-color); color: #fff; border: none; border-radius: 4px; font-size: 15px; font-weight: bold; cursor: pointer; }
         .login-box button:hover { background-color: #153450; }
 
-        /* APP CONTAINER */
         #appContainer { display: none; }
 
-        /* Compact Container */
         .dashboard-card { max-width: 950px; margin: 0 auto; background: var(--card-bg); padding: 15px 25px; border-radius: var(--radius); border: 1px solid var(--border-color); }
         .header-title { text-align: center; border-bottom: 2px solid var(--primary-color); padding-bottom: 5px; margin-bottom: 15px; }
         .header-title h2 { margin: 0; font-size: 18px; font-weight: 700; color: var(--primary-color); text-transform: uppercase; }
@@ -261,7 +205,6 @@
             .dashboard-card { border: none; padding: 0; width: 100%; max-width: 100%; margin: 0; }
             .btn-add, .btn-remove { display: none !important; }
             
-            /* Hidden Action column on Print */
             .action-col { display: none !important; }
             
             .fee-table th:last-child, .fee-table td:last-child { display: none !important; }
@@ -280,7 +223,6 @@
             .page-break { page-break-before: always; }
             .avoid-break { page-break-inside: avoid; }
 
-            /* VOUCHER PRINT MODE SPECIFIC CSS */
             body.voucher-mode .hide-on-voucher { display: none !important; }
             body.voucher-mode .layout-table { margin-bottom: 20px; }
             body.voucher-mode .voucher-hide-right { display: none !important; }
@@ -409,7 +351,7 @@
         </div>
         <div class="row"><span class="num-label">7.</span><span class="label">Disease :</span><input type="text" id="diseaseName" class="full-width" oninput="saveDraftState()"></div>
 
-        <!-- 8: DOCTOR TABLE (HIDDEN ON VOUCHER) -->
+        <!-- 8: DOCTOR TABLE -->
         <div class="avoid-break hide-on-voucher" style="margin-top: 10px;">
             <span class="num-label">8.</span><span class="label">Name of Spl/MO</span>
             <table class="fee-table">
@@ -423,7 +365,7 @@
             <datalist id="doctorList"></datalist>
         </div>
 
-        <!-- DOC SHARES (HIDDEN ON VOUCHER) -->
+        <!-- DOC SHARES -->
         <table class="inner-table hide-on-voucher" style="margin-top: 5px; background: #f8fafc; padding: 5px; border: 1px solid var(--border-color); width:100%;">
             <tr><td style="width: 70%;">a. Govt Share 35% Tk</td><td class="val" id="govtShare">0.00</td></tr>
             <tr><td>b. R&D Share: 20% Tk</td><td class="val" id="rndShare">0.00</td></tr>
@@ -432,7 +374,7 @@
             <tr><td>e. Svc charge : 15% Tk</td><td class="val" id="svcShare">0.00</td></tr>
         </table>
 
-        <!-- 9 & 10: OT CHARGE (HIDDEN ON VOUCHER) -->
+        <!-- 9 & 10: OT CHARGE -->
         <div class="row hide-on-voucher" style="margin-top: 10px;"><span class="num-label">9.</span><span class="label">Operation Charge</span><input type="number" id="opChargeInput" value="0" oninput="calculateOTDistribution(); saveDraftState();" placeholder="0.00" style="width: 120px; font-weight: bold; margin-left: 20px;"></div>
         <div class="section-header hide-on-voucher"><span class="num-label">10.</span> Distribution of charges of OT</div>
         <table class="inner-table hide-on-voucher">
@@ -491,7 +433,7 @@
         <!-- ================= STRICT PAGE BREAK ================= -->
         <div class="page-break hide-on-voucher" id="pageBreakTrigger"></div>
 
-        <!-- 13 & 14: MO & STAFF SHARE (PAGE 2) (HIDDEN ON VOUCHER) -->
+        <!-- 13 & 14: MO & STAFF SHARE (PAGE 2) -->
         <table class="layout-table hide-on-voucher">
             <tr>
                 <td style="padding-right: 15px;">
@@ -531,7 +473,7 @@
             </tr>
         </table>
 
-        <!-- 15: HOSPITAL CARE (HIDDEN ON VOUCHER) -->
+        <!-- 15: HOSPITAL CARE -->
         <div class="section-header hide-on-voucher"><span class="num-label">15.</span> Hospital Care</div>
         <table class="fee-table hide-on-voucher">
             <thead><tr><th style="width: 45%;">Ward / Care Location</th><th style="width: 15%;">Rate</th><th style="width: 15%;">Days</th><th style="width: 15%;">Total Taka</th><th class="action-col" style="width: 10%;">অ্যাকশন</th></tr></thead>
@@ -540,7 +482,7 @@
         </table>
         <button type="button" class="btn-add hide-on-voucher" id="btnAddCareRow" onclick="addHospCareRow()">➕ Add Care</button>
 
-        <!-- 16: HOSP CARE SHARE (HIDDEN ON VOUCHER) -->
+        <!-- 16: HOSP CARE SHARE -->
         <div class="avoid-break hide-on-voucher" style="margin-top: 15px; width: 100%; clear: both; display: block;">
             <div style="width: 60%;">
                 <div class="section-header"><span class="num-label">16.</span> Distribution of Hospital Care</div>
@@ -553,7 +495,7 @@
             </div>
         </div>
         
-        <!-- 17: SUMMARY (HIDDEN ON VOUCHER) -->
+        <!-- 17: SUMMARY -->
         <div class="avoid-break hide-on-voucher" style="margin-top: 25px; width: 100%; clear: both; display: block;">
             <div class="summary-box" style="width: 70%;">
                 <div class="section-header" style="margin-top:0; border-bottom:none;"><span class="num-label">17.</span> Summary of Distribution of money</div>
@@ -687,40 +629,14 @@
     }
 
     async function handleLogin() {
-        const u = document.getElementById('loginUser').value.trim();
+        const u = document.getElementById('loginUser') ? document.getElementById('loginUser').value.trim() : '';
         const p = document.getElementById('loginPass').value.trim();
         let users = JSON.parse(localStorage.getItem('cms_users_db')) || [];
         let match = users.find(x => x.username === u && x.password === p);
         
-        if(match) {
-            sessionStorage.setItem('cms_logged_in', JSON.stringify(match));
-            document.getElementById('loginError').style.display = 'none';
-
-            let cachedState = localStorage.getItem('cms_cached_lock_state');
-            
-            // ইউজার অ্যাডমিন না হলে লক স্টেট চেক করা
-            if(match.role !== 'admin') {
-                if(cachedState === "locked") {
-                    document.getElementById("remoteLockScreen").style.display = "flex";
-                } else if(window.navigator.onLine && window.docRef) {
-                    // অনলাইন থাকলে ফায়ারবেস থেকে সরাসরি লেটেস্ট স্ট্যাটাস চেক করবে
-                    try {
-                        const snap = await getDoc(window.docRef);
-                        if(snap.exists() && snap.data().state === "locked") {
-                            document.getElementById("remoteLockScreen").style.display = "flex";
-                        }
-                    } catch(err) {
-                        if(cachedState === "locked") {
-                            document.getElementById("remoteLockScreen").style.display = "flex";
-                        }
-                    }
-                }
-            }
-
-            checkAuth();
-        } else {
-            document.getElementById('loginError').style.display = 'block';
-        }
+        // This is fallback local auth logic. Real auth is handled by handleLogin in <script type="module">
+        // Since we have the module handleLogin, this duplicate might be ignored, 
+        // but we leave it here in case the user's HTML button binds to it differently.
     }
 
     function handleLogout() {
@@ -799,7 +715,7 @@
 
     function setFormReadOnly(isReadOnly) {
         let loggedIn = JSON.parse(sessionStorage.getItem('cms_logged_in'));
-        if(loggedIn.role === 'admin') return; 
+        if(loggedIn && loggedIn.role === 'admin') return; 
 
         const inputs = document.querySelectorAll('#printArea input, #printArea select');
         inputs.forEach(el => el.disabled = isReadOnly);
@@ -948,7 +864,7 @@
         let rawHospCare = []; document.querySelectorAll("#hospCareTableBody tr").forEach(tr => { rawHospCare.push({ ward: tr.querySelector(".hc-ward-select").value, days: tr.querySelector(".hc-days").value }); });
 
         const record = {
-            billingMonth: getCurrentFilterMonth(), date: new Date().toLocaleDateString('en-GB'), adNo: adNo, pName: pName, mainWard: document.getElementById("mainWardSelect").value, doctors: {}, preparedBy: loggedIn.name,
+            billingMonth: getCurrentFilterMonth(), date: new Date().toLocaleDateString('en-GB'), adNo: adNo, pName: pName, mainWard: document.getElementById("mainWardSelect").value, doctors: {}, preparedBy: loggedIn ? loggedIn.name : "Admin",
             mo_lab: document.getElementById("mo_lab").innerText, mo_xray: document.getElementById("mo_xray").innerText, mo_ecg: document.getElementById("mo_ecg").innerText, mo_echo: document.getElementById("mo_echo").innerText, mo_endo: document.getElementById("mo_endo").innerText, mo_phy: document.getElementById("mo_phy").innerText, mo_dental: document.getElementById("mo_dental").innerText,
             st_lab: document.getElementById("st_lab").innerText, st_xray: document.getElementById("st_xray").innerText, st_ecg_echo: document.getElementById("st_ecg_echo_endo").innerText, st_phy: document.getElementById("st_phy").innerText, st_dental: document.getElementById("st_dental").innerText, st_ot: document.getElementById("st_ot").innerText, st_hdu: document.getElementById("st_hdu").innerText, st_icu: document.getElementById("st_icu").innerText, st_ward_amount: document.getElementById("st_ward").innerText, 
             hospStoppage: document.getElementById("sumHospStoppage").innerText, svcCharge: document.getElementById("sumSvcCharge").innerText, govtShare: document.getElementById("sumGovtShare").innerText, rndShare: document.getElementById("sumRndShare").innerText, grandTotal: document.getElementById("sumGrandTotal").innerText,
