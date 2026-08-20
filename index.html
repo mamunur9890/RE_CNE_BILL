@@ -7,19 +7,119 @@
     
     <!-- Firebase SDKs (v10 Modular) - Single Script Block -->
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    // নতুন Auth মডিউল
+    import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
-        const firebaseConfig = {
-            apiKey: "AIzaSyCqp5idVBbUpKIPbqgTNzi8wd_uYu2g1IQ",
-            authDomain: "hospital-cloud-billing.firebaseapp.com",
-            projectId: "hospital-cloud-billing",
-            storageBucket: "hospital-cloud-billing.firebasestorage.app",
-            messagingSenderId: "521680708519",
-            appId: "1:521680708519:web:e14ea0afad51138bae4c82",
-            measurementId: "G-X8M25CGFWG"
-        };
+    const firebaseConfig = {
+        apiKey: "AIzaSyCqp5idVBbUpKIPbqgTNzi8wd_uYu2g1IQ",
+        authDomain: "hospital-cloud-billing.firebaseapp.com",
+        projectId: "hospital-cloud-billing",
+        storageBucket: "hospital-cloud-billing.firebasestorage.app",
+        messagingSenderId: "521680708519",
+        appId: "1:521680708519:web:e14ea0afad51138bae4c82",
+        measurementId: "G-X8M25CGFWG"
+    };
 
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+    const auth = getAuth(app);
+    
+    window.db = db;
+    window.auth = auth;
+    window.docRef = doc(db, "app_settings", "status");
+
+    // ১. রিয়েল-টাইম সেশন ট্র্যাকার
+    onAuthStateChanged(auth, (user) => {
+        const loginContainer = document.getElementById('loginContainer');
+        const appContainer = document.getElementById('appContainer');
+        
+        if (user) {
+            // ইউজার লগ-ইন থাকলে মূল অ্যাপ দেখান
+            loginContainer.style.display = 'none';
+            appContainer.style.display = 'block';
+            
+            // রিমোট লক চেক চালু করুন
+            setupLockListener(user);
+        } else {
+            // ইউজার লগ-আউট থাকলে লগ-ইন স্ক্রিন দেখান
+            loginContainer.style.display = 'flex';
+            appContainer.style.display = 'none';
+        }
+    });
+
+    // ২. রিমোট লক লিসেনার (অ্যাডমিন বাইপাস সহ)
+    function setupLockListener(user) {
+        onSnapshot(window.docRef, async (docSnap) => {
+            const lockScreen = document.getElementById("remoteLockScreen");
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                
+                // ইউজার কি অ্যাডমিন? (ডাটাবেস থেকে চেক)
+                const adminRef = doc(db, "admins", user.uid);
+                const adminSnap = await getDoc(adminRef);
+                const isAdmin = adminSnap.exists() && adminSnap.data().role === 'admin';
+
+                if (data.state === "locked" && !isAdmin) {
+                    lockScreen.style.display = "flex";
+                } else {
+                    lockScreen.style.display = "none";
+                }
+            }
+        }, (error) => {
+            // রুলস যদি এক্সেস ডিনাই করে, তবে বুঝতে হবে সিস্টেম লকড
+            document.getElementById("remoteLockScreen").style.display = "flex";
+        });
+    }
+
+    // ৩. সিকিউর লগ-ইন ফাংশন
+    window.handleLogin = async function() {
+        const email = document.getElementById('loginEmail').value; 
+        const pass = document.getElementById('loginPass').value;
+        const errorMsg = document.getElementById('loginError');
+
+        if(!email || !pass) {
+            errorMsg.innerText = "ইমেইল এবং পাসওয়ার্ড দিন!";
+            errorMsg.style.display = 'block';
+            return;
+        }
+
+        try {
+            await signInWithEmailAndPassword(auth, email, pass);
+            errorMsg.style.display = 'none';
+        } catch (error) {
+            errorMsg.innerText = "ভুল ইমেইল বা পাসওয়ার্ড!";
+            errorMsg.style.display = 'block';
+        }
+    }
+
+    // ৪. লগ-আউট ফাংশন
+    window.handleLogout = async function() {
+        try {
+            await signOut(auth);
+        } catch (error) {
+            alert("লগ-আউট করতে সমস্যা হয়েছে।");
+        }
+    }
+
+    // ৫. রিমোট লক টগল (শুধু অ্যাডমিনের জন্য)
+    window.toggleRemoteLock = async function() {
+        if(!window.docRef) return;
+        try {
+            const snap = await getDoc(window.docRef);
+            let currentState = "active";
+            if(snap.exists()) currentState = snap.data().state || "active";
+            
+            let newState = (currentState === "active") ? "locked" : "active";
+            await setDoc(window.docRef, { state: newState }, { merge: true });
+            
+            alert(newState === "locked" ? "🔒 সিস্টেম লক করা হয়েছে!" : "🔓 সিস্টেম আনলক করা হয়েছে!");
+        } catch(e) {
+            alert("অ্যাক্সেস ডিনাইড! ফায়ারওয়াল আপনাকে আটকে দিয়েছে।");
+        }
+    }
+</script>
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
         window.db = db;
@@ -215,10 +315,10 @@
 <div id="loginContainer">
     <div class="login-box">
         <h2>Hospital Billing Login</h2>
-        <input type="text" id="loginUser" placeholder="Username" autocomplete="off">
-        <input type="password" id="loginPass" placeholder="Password" autocomplete="off">
-        <button onclick="handleLogin()">Login</button>
-        <p id="loginError" style="color:red; font-size:12px; margin-top:10px; display:none;">ভুল ইউজারনেম বা পাসওয়ার্ড!</p>
+        <input type="email" id="loginEmail" placeholder="Enter Admin Email" autocomplete="off">
+        <input type="password" id="loginPass" placeholder="Enter Password" autocomplete="off">
+        <button type="button" onclick="handleLogin()">Login</button>
+        <p id="loginError" style="color:red; font-size:12px; margin-top:10px; display:none;"></p>
     </div>
 </div>
 
