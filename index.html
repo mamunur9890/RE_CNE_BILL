@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Billing & Management (Remote Secured)</title>
     
-    <!-- Firebase SDKs (v10 Modular) -->
+    <!-- Firebase SDKs (v10 Modular) with Offline Persistence -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, doc, getDoc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
         // আপনার আসল API Config
@@ -23,7 +23,11 @@
         };
 
         const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
+        
+        // দ্য মাস্টারস্ট্রোক: ফায়ারবেস অফলাইন ক্যাশ (ইন্টারনেট ছাড়া কাজ করার মেকানিজম)
+        const db = initializeFirestore(app, {
+            localCache: persistentLocalCache({tabManager: persistentMultipleTabManager()})
+        });
         const auth = getAuth(app);
         
         window.db = db;
@@ -36,10 +40,10 @@
             const appContainer = document.getElementById('appContainer');
             
             if (user) {
-                // ডাটাবেস থেকে ইউজারের রোল চেক করা
                 let role = 'user';
                 let name = 'Staff';
                 try {
+                    // অফলাইনেও ক্যাশ থেকে অ্যাডমিন চেক করবে
                     const adminRef = doc(db, "admins", user.uid);
                     const adminSnap = await getDoc(adminRef);
                     if (adminSnap.exists() && adminSnap.data().role === 'admin') {
@@ -48,7 +52,7 @@
                     }
                 } catch(e) {}
                 
-                // পুরোনো সিস্টেমকে চালু রাখার জন্য লোকাল সেশন মক (Mock) করা
+                // পুরোনো সিস্টেমকে চালু রাখার জন্য লোকাল সেশন মক করা
                 sessionStorage.setItem('cms_logged_in', JSON.stringify({
                     username: user.email,
                     name: name,
@@ -62,7 +66,7 @@
                 if(typeof window.initAppUI === 'function') {
                     window.initAppUI();
                 }
-                setupLockListener(isAdmin = (role === 'admin'));
+                setupLockListener(role === 'admin');
             } else {
                 sessionStorage.removeItem('cms_logged_in');
                 loginContainer.style.display = 'flex';
@@ -70,7 +74,7 @@
             }
         });
 
-        // ২. রিমোট লক লিসেনার
+        // ২. রিমোট লক লিসেনার (অফলাইনেও কাজ করবে)
         function setupLockListener(isAdmin) {
             onSnapshot(window.docRef, (docSnap) => {
                 const lockScreen = document.getElementById("remoteLockScreen");
@@ -83,11 +87,12 @@
                     }
                 }
             }, (error) => {
+                // ইন্টারনেট না থাকলে এবং ক্যাশে এক্সেস না পেলে লক স্ক্রিন দেখাবে
                 document.getElementById("remoteLockScreen").style.display = "flex";
             });
         }
 
-        // ৩. সিকিউর লগ-ইন ফাংশন
+        // ৩. সিকিউর লগ-ইন
         window.handleLogin = async function() {
             const email = document.getElementById('loginEmail').value; 
             const pass = document.getElementById('loginPass').value;
@@ -108,14 +113,10 @@
             }
         }
 
-        // ৪. লগ-আউট ফাংশন
+        // ৪. লগ-আউট
         window.handleLogout = async function() {
             if(confirm("আপনি কি লগআউট করতে চান?")) {
-                try {
-                    await signOut(auth);
-                } catch (error) {
-                    alert("লগ-আউট করতে সমস্যা হয়েছে।");
-                }
+                try { await signOut(auth); } catch (error) { alert("লগ-আউট করতে সমস্যা হয়েছে।"); }
             }
         }
 
@@ -124,17 +125,40 @@
             if(!window.docRef) return;
             try {
                 const snap = await getDoc(window.docRef);
-                let currentState = "active";
-                if(snap.exists()) currentState = snap.data().state || "active";
-                
+                let currentState = snap.exists() ? (snap.data().state || "active") : "active";
                 let newState = (currentState === "active") ? "locked" : "active";
-                await setDoc(window.docRef, { state: newState }, { merge: true });
                 
+                await setDoc(window.docRef, { state: newState }, { merge: true });
                 alert(newState === "locked" ? "🔒 সিস্টেম লক করা হয়েছে!" : "🔓 সিস্টেম আনলক করা হয়েছে!");
             } catch(e) {
                 alert("অ্যাক্সেস ডিনাইড! ফায়ারওয়াল আপনাকে আটকে দিয়েছে।");
             }
         }
+
+        // ৬. অটো-ক্লাউড ব্যাকআপ হাইজ্যাকার (অফলাইন টু অনলাইন সিঙ্ক)
+        setTimeout(() => {
+            if(typeof window.saveToMonthlyRecord === 'function') {
+                const originalSave = window.saveToMonthlyRecord;
+                window.saveToMonthlyRecord = async function() {
+                    // প্রথমে আপনার পুরনো সিস্টেমে লোকালি সেভ করবে
+                    originalSave();
+                    
+                    // এরপর ফায়ারবেসে ব্যাকআপ পাঠাবে (ইন্টারনেট না থাকলে বাফারে জমা থাকবে)
+                    try {
+                        const localData = localStorage.getItem('cms_monthly_detailed');
+                        if(localData) {
+                            await setDoc(doc(db, "patients", "billing_backup"), {
+                                payload: localData,
+                                last_synced: new Date().toISOString()
+                            }, { merge: true });
+                            console.log("✅ Data queued for Cloud Sync!");
+                        }
+                    } catch(e) {
+                        console.log("⚠️ Offline mode: Data will sync automatically when online.");
+                    }
+                }
+            }
+        }, 1000);
     </script>
 
     <style>
@@ -178,7 +202,7 @@
         .btn-manage-doc { background-color: #8b5cf6; } .btn-manage-pat { background-color: #0ea5e9; } 
         .btn-monthly { background-color: #f59e0b; } .btn-clear { background-color: #ef4444; }
         .btn-backup { background-color: #10b981; } .btn-restore { background-color: #3b82f6; }
-        .btn-users { background-color: #334155; } .btn-logout { background-color: #e11d48; }
+        .btn-logout { background-color: #e11d48; }
         .btn-remote-lock { background-color: #dc2626; }
         .btn-svc-charge { background-color: #14b8a6; }
 
@@ -265,7 +289,7 @@
 <div id="loginContainer">
     <div class="login-box">
         <h2>Hospital Billing Login</h2>
-        <input type="email" id="loginEmail" placeholder="Enter Admin Email" autocomplete="off">
+        <input type="email" id="loginEmail" placeholder="Enter User/Admin Email" autocomplete="off">
         <input type="password" id="loginPass" placeholder="Enter Password" autocomplete="off">
         <button type="button" onclick="handleLogin()">Login</button>
         <p id="loginError" style="color:red; font-size:12px; margin-top:10px; display:none;"></p>
@@ -274,31 +298,6 @@
 
 <!-- 2. MAIN APPLICATION -->
 <div id="appContainer">
-
-    <!-- USER MANAGEMENT MODAL (ADMIN ONLY) -->
-    <div id="userModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header"><h3>🔐 ইউজার ম্যানেজমেন্ট</h3><span class="close-btn" onclick="closeUserModal()">&times;</span></div>
-            
-            <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom: 15px; background:#f1f5f9; padding:10px; border-radius:4px;">
-                <input type="text" id="new_u_name" placeholder="Full Name (স্টাফের নাম)" style="flex:1; min-width:150px;">
-                <input type="text" id="new_u_id" placeholder="Username" style="flex:1; min-width:100px;">
-                <input type="text" id="new_u_pass" placeholder="Password" style="flex:1; min-width:100px;">
-                <button type="button" class="btn-sm btn-users" onclick="addNewUser()">Add User</button>
-            </div>
-            
-            <h4>ইউজার লিস্ট</h4>
-            <div id="modal_user_list" style="margin-bottom: 15px; max-height: 150px; overflow-y: auto;"></div>
-
-            <div style="border-top: 2px solid #ddd; margin-top: 15px; padding-top: 15px;">
-                <h4 style="color: var(--accent-color);">আপনার নিজের পাসওয়ার্ড পরিবর্তন করুন</h4>
-                <div style="display:flex; gap:8px; margin-top: 8px;">
-                    <input type="text" id="change_pass_input" placeholder="নতুন পাসওয়ার্ড লিখুন" style="flex:1; padding: 6px;">
-                    <button type="button" class="btn-sm btn-users" onclick="changeMyPassword()">Update Password</button>
-                </div>
-            </div>
-        </div>
-    </div>
 
     <!-- DOCTOR MANAGEMENT MODAL -->
     <div id="docModal" class="modal">
@@ -336,7 +335,7 @@
                 <datalist id="patientSearchList"></datalist>
             </div>
             <div class="nav-buttons">
-                <button class="btn-sm btn-users admin-only" onclick="openUserModal()">🔐 Manage Users</button>
+                <!-- User management button is permanently removed -->
                 <button class="btn-sm btn-manage-pat admin-only" onclick="openPatientModal()">👥 Manage Patients</button>
                 <button class="btn-sm btn-manage-doc admin-only" onclick="openDocModal()">👨‍⚕️ Doctors</button>
                 <button class="btn-sm btn-monthly admin-only" onclick="downloadMonthlyCSV()">📅 Export Excel</button>
@@ -619,45 +618,9 @@
         idleTimer = setTimeout(() => {
             if(sessionStorage.getItem('cms_logged_in')) {
                 alert("নিরাপত্তার জন্য দীর্ঘক্ষণ কাজ না করায় সেশন লগআউট হয়ে গেছে!");
-                window.handleLogout(); // ফায়ারবেস লগ-আউট কল করবে
+                window.handleLogout();
             }
         }, 15 * 60 * 1000);
-    }
-
-    // ইউজার ম্যানেজমেন্ট (লোকাল স্টাফদের জন্য)
-    function openUserModal() {
-        let users = JSON.parse(localStorage.getItem('cms_users_db')) || [];
-        const container = document.getElementById("modal_user_list"); container.innerHTML = "";
-        users.forEach((u, idx) => {
-            let delBtn = u.role !== 'admin' ? `<button class="btn-remove" onclick="deleteUser(${idx})">Delete</button>` : '';
-            container.innerHTML += `<div class="list-item"><span style="font-weight:bold; font-size:12px;">${u.name} (User: ${u.username}) - Pass: ${u.password}</span>${delBtn}</div>`;
-        });
-        document.getElementById('userModal').style.display = 'block';
-    }
-    function closeUserModal() { document.getElementById('userModal').style.display = 'none'; }
-    function addNewUser() {
-        const name = document.getElementById('new_u_name').value.trim();
-        const user = document.getElementById('new_u_id').value.trim();
-        const pass = document.getElementById('new_u_pass').value.trim();
-        if(name && user && pass) {
-            let users = JSON.parse(localStorage.getItem('cms_users_db')) || [];
-            if(users.find(x => x.username === user)) { alert('এই ইউজারনেমটি আগে থেকেই আছে!'); return; }
-            users.push({ username: user, password: pass, name: name, role: 'user' });
-            localStorage.setItem('cms_users_db', JSON.stringify(users));
-            document.getElementById('new_u_name').value = ''; document.getElementById('new_u_id').value = ''; document.getElementById('new_u_pass').value = '';
-            openUserModal();
-        } else { alert("সবগুলো তথ্য সঠিকভাবে পূরণ করুন!"); }
-    }
-    function deleteUser(idx) {
-        if(confirm("এই ইউজারকে ডিলিট করতে চান?")) {
-            let users = JSON.parse(localStorage.getItem('cms_users_db')) || [];
-            users.splice(idx, 1);
-            localStorage.setItem('cms_users_db', JSON.stringify(users));
-            openUserModal();
-        }
-    }
-    function changeMyPassword() {
-        alert("পাসওয়ার্ড পরিবর্তন করতে হলে ফায়ারবেস কনসোল (Firebase Console) ব্যবহার করুন।");
     }
 
     function initializeMonthFilter() {
@@ -800,7 +763,7 @@
     function exportBackup() {
         let backup = {
             monthly: localStorage.getItem('cms_monthly_detailed'), doctors: localStorage.getItem('cms_doctors_db'),
-            draft: localStorage.getItem('cms_billing_draft'), users: localStorage.getItem('cms_users_db')
+            draft: localStorage.getItem('cms_billing_draft')
         };
         let blob = new Blob([JSON.stringify(backup)], {type: "application/json"}); const link = document.createElement("a"); link.href = URL.createObjectURL(blob);
         const dateStr = new Date().toISOString().split('T')[0]; link.download = `Hospital_Backup_${dateStr}.json`; document.body.appendChild(link); link.click(); document.body.removeChild(link);
@@ -813,13 +776,13 @@
                 if(data.monthly) localStorage.setItem('cms_monthly_detailed', data.monthly);
                 if(data.doctors) localStorage.setItem('cms_doctors_db', data.doctors);
                 if(data.draft) localStorage.setItem('cms_billing_draft', data.draft);
-                if(data.users) localStorage.setItem('cms_users_db', data.users);
                 alert("✅ ডাটা সফলভাবে রিস্টোর হয়েছে!"); location.reload();
             } catch(err) { alert("❌ ভুল ব্যাকআপ ফাইল! এটি রিস্টোর করা সম্ভব নয়।"); }
         }; reader.readAsText(file);
     }
 
-    function saveToMonthlyRecord() {
+    // এই ফাংশনটি মডিউল স্ক্রিপ্ট দ্বারা হাইজ্যাক হয়ে ক্লাউডে সিঙ্ক হবে
+    window.saveToMonthlyRecord = function() {
         const opCharge = parseFloat(document.getElementById("opChargeInput").value) || 0;
         if(opCharge > 50000) { if(!confirm("⚠️ Operation Charge 50,000 টাকার বেশি দেওয়া হয়েছে। অ্যামাউন্ট কি ঠিক আছে?")) return; }
 
@@ -896,7 +859,7 @@
                     let days = Math.ceil((d2 - d1) / (1000 * 60 * 60 * 24)) + 1;
                     document.getElementById("totalDays").value = days; 
                 } else { 
-                    alert("⚠️ রিলিজের তারিখ ভর্তির তারিখের আগে হতে পারে না!"); document.getElementById("dischargeDate").value = ""; document.getElementById("totalDays").value = 0; 
+                    alert("⚠️ রিলিজের তারিখ ভর্তির তারিখের আগে হতে পারে കട না!"); document.getElementById("dischargeDate").value = ""; document.getElementById("totalDays").value = 0; 
                 } 
             } 
         } else { document.getElementById("totalDays").value = 0; }
