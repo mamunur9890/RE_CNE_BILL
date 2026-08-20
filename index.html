@@ -79,21 +79,6 @@
         const pass = document.getElementById('loginPass').value;
         const errorMsg = document.getElementById('loginError');
 
-        if(!email || !pass) {
-            errorMsg.innerText = "ইমেইল এবং পাসওয়ার্ড দিন!";
-            errorMsg.style.display = 'block';
-            return;
-        }
-
-        try {
-            await signInWithEmailAndPassword(auth, email, pass);
-            errorMsg.style.display = 'none';
-        } catch (error) {
-            errorMsg.innerText = "ভুল ইমেইল বা পাসওয়ার্ড!";
-            errorMsg.style.display = 'block';
-        }
-    }
-
     // ৪. লগ-আউট ফাংশন
     window.handleLogout = async function() {
         try {
