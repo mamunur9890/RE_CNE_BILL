@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Billing & Management (Cloud Secured)</title>
     
-    <!-- Firebase SDKs (v10 Modular) -->
+    <!-- Firebase SDKs (v10 Modular) with All Fixes & UX Enhancements -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
         import { getFirestore, doc, getDoc, setDoc, onSnapshot, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
@@ -87,7 +87,7 @@
             });
         }
 
-        // ৩. সিকিউর লগ-ইন (সেশন পারসিস্টেন্স সহ)
+        // ৩. সিকিউর লগ-ইন (সেশন পারসিস্টেন্স সহ - ব্রাউজার কাটলে লগআউট)
         window.handleLogin = async function() {
             const email = document.getElementById('loginEmail').value; 
             const pass = document.getElementById('loginPass').value;
@@ -95,7 +95,6 @@
             if(!email || !pass) return errorMsg.style.display = 'block';
             
             try {
-                // ব্রাউজার ক্লোজ করলে অটো লগ-আউট হওয়ার লজিক
                 await setPersistence(auth, browserSessionPersistence);
                 await signInWithEmailAndPassword(auth, email, pass);
                 errorMsg.style.display = 'none';
@@ -109,6 +108,7 @@
         window.handleLogout = async function() {
             if(confirm("আপনি কি লগআউট করতে চান?")) {
                 isIntentionallyLoggedOut = true;
+                localStorage.removeItem("cms_billing_draft"); // ড্রাফ্ট ক্লিয়ার
                 try { await signOut(auth); } catch (error) { alert("লগ-আউট করতে সমস্যা হয়েছে।"); }
             }
         }
@@ -278,7 +278,7 @@
         </div>
     </div>
 
-    <!-- PATIENT MANAGEMENT MODAL (RESTORED) -->
+    <!-- PATIENT MANAGEMENT MODAL -->
     <div id="patientModal" class="modal">
         <div class="modal-content">
             <div class="modal-header"><h3>👥 পেশেন্ট ম্যানেজমেন্ট</h3><span class="close-btn" onclick="closePatientModal()">&times;</span></div>
@@ -362,7 +362,7 @@
         <div class="section-header hide-on-voucher"><span class="num-label">10.</span> Distribution of charges of OT</div>
         <table class="inner-table hide-on-voucher">
             <tr><td style="width: 200px;">a. Surgeon: 13% <span id="surgeonShare" class="val" style="margin-left: 5px;">0.00</span></td><td><span style="font-weight: 600;">Name:</span> <input type="text" list="doctorList" id="surgeonName" oninput="calculateOTDistribution(); saveDraftState();" style="width: 250px;"></td></tr>
-            <tr><td>a. Anaesthesiologist: 07% <span id="anaesShare" class="val" style="margin-left: 5px;">0.00</span></td><td><span style="font-weight: 600;">Name:</span> <input type="text" list="doctorList" id="anaesName" oninput="calculateOTDistribution(); saveDraftState();" style="width: 250px;"></td></tr>
+            <tr><td style="width: 200px;">b. Anaesthesiologist: 07% <span id="anaesShare" class="val" style="margin-left: 5px;">0.00</span></td><td><span style="font-weight: 600;">Name:</span> <input type="text" list="doctorList" id="anaesName" oninput="calculateOTDistribution(); saveDraftState();" style="width: 250px;"></td></tr>
             <tr><td colspan="2">c. Govt: 35% <span id="otGovtShare" class="val" style="margin-left: 5px;">0.00</span></td></tr>
             <tr><td colspan="2">d. R&D : 20% <span id="otRndShare" class="val" style="margin-left: 5px;">0.00</span></td></tr>
             <tr><td colspan="2">e. Staff Share: 10% <span id="otStaffShare" class="val" style="margin-left: 5px;">0.00</span></td></tr>
@@ -534,7 +534,6 @@
     let idleTimer;
     let adminExtraSvcCharge = 0; 
 
-    // নতুন ইনিশিয়ালাইজেশন মেথড
     window.initAppUI = function() {
         let loggedIn = JSON.parse(sessionStorage.getItem('cms_logged_in'));
         if(!loggedIn) return;
@@ -585,7 +584,7 @@
     }
 
     // ==========================================
-    // PATIENT MANAGEMENT FUNCTIONS (RESTORED)
+    // PATIENT MANAGEMENT FUNCTIONS
     // ==========================================
     window.openPatientModal = function() {
         let allData = JSON.parse(localStorage.getItem('cms_monthly_detailed')) || [];
@@ -615,7 +614,6 @@
             localStorage.setItem('cms_monthly_detailed', JSON.stringify(allData));
             updateSearchDatalist();
             openPatientModal();
-            // Cloud Sync
             try {
                 if (window.firestoreDoc && window.db) {
                     window.firestoreSetDoc(window.firestoreDoc(window.db, "patients", "billing_backup"), {
@@ -764,7 +762,7 @@
         setFormReadOnly(true); 
     }
 
- // ==========================================
+    // ==========================================
     // DATA SAVE & CLOUD SYNC ENGINE (DOUBLE-COUNT BUG FIXED)
     // ==========================================
     window.saveToMonthlyRecord = function() {
@@ -787,9 +785,6 @@
             rawState: { inputs: rawInputs, doctors: rawDoctors, hospCare: rawHospCare, adminExtraSvcCharge: adminExtraSvcCharge }
         };
         
-        // -----------------------------------------------------
-        // BUG FIX: Smart OT Distribution (Preventing Double Count)
-        // -----------------------------------------------------
         const surgName = document.getElementById("surgeonName").value.trim().toUpperCase(); 
         const surgShare = parseFloat(document.getElementById("surgeonShare").innerText) || 0;
         const anaesName = document.getElementById("anaesName").value.trim().toUpperCase(); 
@@ -806,18 +801,14 @@
                 record.doctors[docName] = (record.doctors[docName] || 0) + share; 
             }
             
-            // চেক করা হচ্ছে সার্জন বা অ্যানেস্থেটিস্ট মূল টেবিলে আছে কি না
             if (docName !== "") {
                 if (surgName !== "" && docName === surgName && !isSurgMatched) { isSurgMatched = true; }
                 if (anaesName !== "" && docName === anaesName && !isAnaesMatched) { isAnaesMatched = true; }
             }
         });
 
-        // যদি তারা মূল টেবিলে না থাকে, তবেই এক্সট্রা যোগ হবে (ডাবল কাউন্টিং রোধ)
         if(surgName && surgShare > 0 && !isSurgMatched) record.doctors[surgName] = (record.doctors[surgName] || 0) + surgShare;
         if(anaesName && anaesShare > 0 && !isAnaesMatched) record.doctors[anaesName] = (record.doctors[anaesName] || 0) + anaesShare;
-
-        // -----------------------------------------------------
 
         let monthlyData = JSON.parse(localStorage.getItem('cms_monthly_detailed')) || []; let existingIndex = monthlyData.findIndex(r => String(r.adNo) === String(adNo));
         if(existingIndex >= 0) { monthlyData[existingIndex] = record; alert("✅ বিলটি সফলভাবে আপডেট হয়েছে!"); } else { monthlyData.push(record); alert(`✅ বিলটি সফলভাবে ${getCurrentFilterMonth()} মাসের খাতায় সেভ হয়েছে!`); }
@@ -987,7 +978,6 @@
     function onHospCareWardChange(selectElem) { selectElem.closest("tr").querySelector(".hc-rate").value = (wardRates[document.getElementById("categorySelect").value] || wardRates["CNE"])[selectElem.value] || 0; calculateHospCareTotals(); }
     function recalculateAllHospCareRows() { document.querySelectorAll("#hospCareTableBody tr").forEach(row => { const s = row.querySelector(".hc-ward-select"); if(s) onHospCareWardChange(s); }); }
     
-    // বাগ ফিক্স: Hospital Care সেকশন থেকে ১৪ নাম্বার সেকশন ট্রিগার করা হলো
     function calculateHospCareTotals() {
         let grandTotal = 0; 
         document.querySelectorAll("#hospCareTableBody tr").forEach(row => { 
@@ -1000,8 +990,6 @@
         document.getElementById("hcRnd").innerText = (grandTotal * 0.30).toFixed(2); 
         document.getElementById("hcStaff").innerText = (grandTotal * 0.10).toFixed(2); 
         document.getElementById("hcSvc").innerText = (grandTotal * 0.25).toFixed(2);
-        
-        // ট্রিগার: স্টাফ শেয়ার ডিস্ট্রিবিউশন লাইভ আপডেট
         calculateOTDistribution(); 
     }
 
@@ -1057,8 +1045,25 @@
         const link = document.createElement('a'); link.href = url; link.download = fileName; document.body.appendChild(link); link.click(); document.body.removeChild(link);
     }
 
+    // 🚀 UX Enhancement: Auto-select or clear '0' on input focus
+    document.addEventListener("focusin", function(e) {
+        if (e.target.tagName === "INPUT" && e.target.type === "number") {
+            if (e.target.value === "0" || e.target.value === "0.00") {
+                e.target.value = "";
+            }
+        }
+    });
+
+    document.addEventListener("focusout", function(e) {
+        if (e.target.tagName === "INPUT" && e.target.type === "number") {
+            if (e.target.value.trim() === "") {
+                e.target.value = "0";
+            }
+        }
+    });
+
     window.onload = function() {
-        if(typeof window.initAppUI === 'function') window.initAppUI();
+        checkAuth(); 
     };
 </script>
 
