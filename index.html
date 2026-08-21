@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Hospital Billing & Management (Cloud Secured)</title>
     
-    <!-- Firebase SDKs (v10 Modular) -->
+    <!-- Firebase SDKs (v10 Modular) with Cloud Doctor Sync -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-        import { getFirestore, doc, getDoc, setDoc, onSnapshot, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection, getDocs, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut, setPersistence, browserSessionPersistence } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
 
         const firebaseConfig = {
@@ -61,6 +61,11 @@
                 loginContainer.style.display = 'none';
                 appContainer.style.display = 'block';
                 
+                // ফায়ারবেস থেকে ডাক্তার লিস্ট সিঙ্ক করে নিয়ে আসা
+                if(typeof window.syncDoctorsFromCloud === 'function') {
+                    await window.syncDoctorsFromCloud();
+                }
+
                 if(typeof window.initAppUI === 'function') window.initAppUI();
                 setupLockListener(role === 'admin');
             } else {
@@ -532,6 +537,23 @@
     let idleTimer;
     let adminExtraSvcCharge = 0; 
 
+    // ফায়ারবেস ক্লাউড থেকে ডাক্তার লিস্ট সিঙ্ক করার ফাংশন
+    window.syncDoctorsFromCloud = async function() {
+        try {
+            const docRef = window.firestoreDoc(window.db, "app_settings", "doctors_list");
+            const docSnap = await window.firestoreGetDoc(docRef);
+            if (docSnap.exists() && docSnap.data().doctors) {
+                doctorDB = docSnap.data().doctors;
+                localStorage.setItem('cms_doctors_db', JSON.stringify(doctorDB));
+            } else {
+                // যদি ক্লাউডে না থাকে, তবে ডিফল্ট লিস্ট ক্লাউডে আপলোড করে দেওয়া
+                await window.firestoreSetDoc(docRef, { doctors: doctorDB }, { merge: true });
+            }
+        } catch(e) {
+            console.log("Using local doctor DB due to offline mode.");
+        }
+    }
+
     window.initAppUI = function() {
         let loggedIn = JSON.parse(sessionStorage.getItem('cms_logged_in'));
         if(!loggedIn) return;
@@ -685,26 +707,67 @@
         const datalist = document.getElementById("doctorList"); datalist.innerHTML = "";
         doctorDB.forEach(doc => { let opt = document.createElement("option"); opt.value = doc.name; opt.setAttribute("data-fee", doc.fee); datalist.appendChild(opt); });
     }
+    
     function openDocModal() { renderModalDocList(); document.getElementById('docModal').style.display = 'block'; }
     function closeDocModal() { document.getElementById('docModal').style.display = 'none'; updateDoctorDatalist(); }
+    
     function renderModalDocList() {
         const listContainer = document.getElementById("modal_doctor_list"); listContainer.innerHTML = "";
         doctorDB.forEach((doc, index) => {
             listContainer.innerHTML += `<div class="list-item"><span style="font-weight:bold; font-size:12px;">${doc.name} (৳${doc.fee})</span><button class="btn-remove" onclick="deleteDoctor(${index})">Delete</button></div>`;
         });
     }
-    function addNewDoctor() {
-        const name = document.getElementById("new_doc_name").value.trim().toUpperCase(); const fee = parseFloat(document.getElementById("new_doc_fee").value) || 0;
-        if(name && fee >= 0) { doctorDB.push({ name: name, fee: fee }); localStorage.setItem('cms_doctors_db', JSON.stringify(doctorDB)); document.getElementById("new_doc_name").value = ""; document.getElementById("new_doc_fee").value = ""; renderModalDocList(); } else { alert("সঠিক নাম এবং ফি প্রদান করুন!"); }
+
+    // নতুন ডাক্তার ক্লাউডে সেভ করার লজিক সহ
+    window.addNewDoctor = async function() {
+        const name = document.getElementById("new_doc_name").value.trim().toUpperCase(); 
+        const fee = parseFloat(document.getElementById("new_doc_fee").value) || 0;
+        if(name && fee >= 0) { 
+            doctorDB.push({ name: name, fee: fee }); 
+            localStorage.setItem('cms_doctors_db', JSON.stringify(doctorDB)); 
+            
+            // ফায়ারবেস ক্লাউডে ডাক্তার লিস্ট আপডেট করা
+            try {
+                if(window.firestoreDoc && window.db) {
+                    await window.firestoreSetDoc(window.firestoreDoc(window.db, "app_settings", "doctors_list"), {
+                        doctors: doctorDB
+                    }, { merge: true });
+                }
+            } catch(e) {}
+
+            document.getElementById("new_doc_name").value = ""; 
+            document.getElementById("new_doc_fee").value = ""; 
+            renderModalDocList(); 
+            updateDoctorDatalist();
+            alert("✅ নতুন ডাক্তার সফলভাবে ক্লাউডে অ্যাড হয়েছে!");
+        } else { 
+            alert("সঠিক নাম এবং ফি প্রদান করুন!"); 
+        }
     }
-    function deleteDoctor(index) { if(confirm("আপনি কি এই ডাক্তারকে তালিকা থেকে মুছে ফেলতে চান?")) { doctorDB.splice(index, 1); localStorage.setItem('cms_doctors_db', JSON.stringify(doctorDB)); renderModalDocList(); } }
+
+    window.deleteDoctor = async function(index) { 
+        if(confirm("আপনি কি এই ডাক্তারকে তালিকা থেকে মুছে ফেলতে চান?")) { 
+            doctorDB.splice(index, 1); 
+            localStorage.setItem('cms_doctors_db', JSON.stringify(doctorDB)); 
+            
+            try {
+                if(window.firestoreDoc && window.db) {
+                    await window.firestoreSetDoc(window.firestoreDoc(window.db, "app_settings", "doctors_list"), {
+                        doctors: doctorDB
+                    }, { merge: true });
+                }
+            } catch(e) {}
+
+            renderModalDocList(); 
+            updateDoctorDatalist();
+        } 
+    }
 
     const formInputsToSave = ["patientType", "adNumber", "patientName", "guardianName", "relationship", "admissionDate", "dischargeDate", "diseaseName", "opChargeInput", "surgeonName", "anaesName", "inv_lab", "inv_rtpcr", "inv_xray", "inv_ctscan", "inv_ecg", "inv_echo", "inv_endoscopy", "inv_phy", "inv_dental", "mainWardSelect"];
     
     function saveDraftState() { 
         let state = {}; 
         formInputsToSave.forEach(id => { const el = document.getElementById(id); if(el) state[id] = el.value; });
-        // ক্যাটাগরি এবং রোগীর টাইপ explicitly সেভ করা হচ্ছে (বাগ ফিক্স)
         state['patientType'] = document.getElementById("patientType").value;
         state['categorySelect'] = document.getElementById("categorySelect").value;
         state['adminExtraSvcCharge'] = adminExtraSvcCharge; 
@@ -716,7 +779,6 @@
             let state = JSON.parse(localStorage.getItem("cms_billing_draft"));
             if(!state) return;
             
-            // প্রথমে পেশেন্ট টাইপ এবং ক্যাটাগরি রিস্টোর করা হচ্ছে যাতে ড্রاق্ট ওভাররাইট না হয়
             if(state.patientType) {
                 document.getElementById("patientType").value = state.patientType;
                 updateCategories();
@@ -772,7 +834,7 @@
     }
 
     // ==========================================
-    // DATA SAVE & CLOUD SYNC ENGINE (FIXED)
+    // DATA SAVE & CLOUD SYNC ENGINE
     // ==========================================
     window.saveToMonthlyRecord = function() {
         const opCharge = parseFloat(document.getElementById("opChargeInput").value) || 0;
@@ -783,7 +845,6 @@
         
         let loggedIn = JSON.parse(sessionStorage.getItem('cms_logged_in'));
         let rawInputs = {}; formInputsToSave.forEach(id => { if(document.getElementById(id)) rawInputs[id] = document.getElementById(id).value; });
-        // ক্যাটাগরি ও পেশেন্ট টাইপ র এজস্টেটে সেভ করা হচ্ছে
         rawInputs['patientType'] = document.getElementById("patientType").value;
         rawInputs['categorySelect'] = document.getElementById("categorySelect").value;
 
@@ -840,7 +901,7 @@
         } catch(e) {}
     }
 
-    // ক্লাউড ইন্টিগ্রেটেড এক্সেল এক্সপোর্ট ইঞ্জিন (পয়সা সাম ফিক্সড)
+    // এক্সেল এক্সপোর্ট ইঞ্জিন
     window.downloadMonthlyCSV = async function() {
         const currentMonth = getCurrentFilterMonth();
         let allData = [];
@@ -887,11 +948,10 @@
 
     function updateCategories() {
         const type = document.getElementById("patientType").value; const catSelect = document.getElementById("categorySelect"); 
-        let currentCat = catSelect.value; // বর্তমান সিলেক্ট করা ক্যাটাগরি ধরে রাখা হচ্ছে
+        let currentCat = catSelect.value;
         catSelect.innerHTML = "";
         stoppagesData[type].forEach(item => { let opt = document.createElement("option"); opt.value = item.name; opt.setAttribute("data-rate", item.rate); opt.innerHTML = item.name; catSelect.appendChild(opt); }); 
         
-        // যদি আগের ক্যাটাগরি নতুন টাইপে থাকে তবে সেটি রি-সিলেক্ট করা
         if(currentCat && Array.from(catSelect.options).some(o => o.value === currentCat)) {
             catSelect.value = currentCat;
         }
@@ -1065,7 +1125,6 @@
         const link = document.createElement('a'); link.href = url; link.download = fileName; document.body.appendChild(link); link.click(); document.body.removeChild(link);
     }
 
-    // UX Enhancement: Auto-select or clear '0' on input focus
     document.addEventListener("focusin", function(e) {
         if (e.target.tagName === "INPUT" && e.target.type === "number") {
             if (e.target.value === "0" || e.target.value === "0.00") {
